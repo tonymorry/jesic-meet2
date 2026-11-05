@@ -1480,7 +1480,8 @@ export default function App() {
     avatar?: string,
     isPublic?: boolean,
     code?: string,
-    parentId?: string | null
+    parentId?: string | null,
+    color?: string
   ) => {
     if (!activeGroup || !currentUser) return;
 
@@ -1500,6 +1501,7 @@ export default function App() {
           name: name.trim(),
           description: description?.trim() || '',
           avatar: avatar || '📁',
+          color: color || '#8b5cf6',
           isPublic: Boolean(isPublic),
           code: code ? code.trim().toUpperCase() : undefined,
           parentId: cleanParent,
@@ -1523,7 +1525,7 @@ export default function App() {
 
   const handleUpdateSubgroup = async (
     subgroupId: string,
-    data: { name: string; description?: string; avatar?: string; isPublic?: boolean }
+    data: { name: string; description?: string; avatar?: string; color?: string; isPublic?: boolean }
   ) => {
     if (!activeGroup || !currentUser) return;
     try {

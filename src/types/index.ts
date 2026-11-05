@@ -41,6 +41,7 @@ export interface Subgroup {
   name: string;
   description?: string;
   avatar?: string; // Emoji o icona personalizzata (es. '📁', '🚀')
+  color?: string; // Colore identificativo (es. '#8b5cf6', '#3b82f6')
   isPublic?: boolean; // Se true, accessibile a tutti i membri del gruppo; se false, richiede codice univoco
   code?: string; // Codice univoco per accedere al sottogruppo
   members?: string[]; // IDs degli utenti che hanno inserito il codice e possono accedere

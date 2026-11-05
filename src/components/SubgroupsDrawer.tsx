@@ -46,11 +46,12 @@ export interface SubgroupsDrawerProps {
     avatar?: string,
     isPublic?: boolean,
     code?: string,
-    parentId?: string | null
+    parentId?: string | null,
+    color?: string
   ) => Promise<boolean | void>;
   onUpdateSubgroup?: (
     subgroupId: string,
-    data: { name: string; description?: string; avatar?: string; isPublic?: boolean }
+    data: { name: string; description?: string; avatar?: string; color?: string; isPublic?: boolean }
   ) => Promise<boolean | void>;
   onDeleteSubgroup?: (subgroupId: string) => Promise<boolean | void>;
   onJoinSubgroup?: (
@@ -59,7 +60,22 @@ export interface SubgroupsDrawerProps {
   ) => Promise<{ success: boolean; error?: string; subgroup?: any }>;
 }
 
-const PRESET_ICONS = ['📁', '🚀', '💡', '💻', '📊', '🎯', '⚡', '🏢', '🔥', '🎓', '🎨', '💼', '⭐', '🛠️', '👥'];
+export const PRESET_ICONS = ['📁', '🚀', '💡', '💻', '📊', '🎯', '⚡', '🏢', '🔥', '🎓', '🎨', '💼', '⭐', '🛠️', '👥'];
+
+export const PRESET_COLORS = [
+  { hex: '#8b5cf6', label: 'Viola' },
+  { hex: '#3b82f6', label: 'Blu' },
+  { hex: '#10b981', label: 'Smeraldo' },
+  { hex: '#f59e0b', label: 'Ambra' },
+  { hex: '#f43f5e', label: 'Corallo' },
+  { hex: '#06b6d4', label: 'Ciano' },
+  { hex: '#6366f1', label: 'Indaco' },
+  { hex: '#ec4899', label: 'Rosa' },
+  { hex: '#14b8a6', label: 'Teal' },
+  { hex: '#f97316', label: 'Arancione' },
+  { hex: '#84cc16', label: 'Lime' },
+  { hex: '#64748b', label: 'Ardesia' },
+];
 
 export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
   isOpen,
@@ -77,8 +93,11 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
   const [newSubgroupName, setNewSubgroupName] = useState('');
   const [newSubgroupDesc, setNewSubgroupDesc] = useState('');
   const [newSubgroupAvatar, setNewSubgroupAvatar] = useState('📁');
+  const [newSubgroupColor, setNewSubgroupColor] = useState('#8b5cf6');
   const [showAllIconsCreate, setShowAllIconsCreate] = useState(false);
+  const [showAllColorsCreate, setShowAllColorsCreate] = useState(false);
   const [showAllIconsEdit, setShowAllIconsEdit] = useState(false);
+  const [showAllColorsEdit, setShowAllColorsEdit] = useState(false);
   const [newSubgroupIsPublic, setNewSubgroupIsPublic] = useState(false);
   const [newSubgroupCustomCode, setNewSubgroupCustomCode] = useState('');
   const [newSubgroupParentId, setNewSubgroupParentId] = useState<string | null>(null);
@@ -135,6 +154,7 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editAvatar, setEditAvatar] = useState('📁');
+  const [editColor, setEditColor] = useState('#8b5cf6');
   const [editIsPublic, setEditIsPublic] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -267,11 +287,13 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
         newSubgroupAvatar,
         newSubgroupIsPublic,
         newSubgroupCustomCode.trim() ? newSubgroupCustomCode.trim().toUpperCase() : undefined,
-        cleanParentId
+        cleanParentId,
+        newSubgroupColor
       );
       setNewSubgroupName('');
       setNewSubgroupDesc('');
       setNewSubgroupAvatar('📁');
+      setNewSubgroupColor('#8b5cf6');
       setNewSubgroupIsPublic(false);
       setNewSubgroupCustomCode('');
       setNewSubgroupParentId(null);
@@ -313,6 +335,7 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
     setEditName(subgroup.name);
     setEditDesc(subgroup.description || '');
     setEditAvatar(subgroup.avatar || '📁');
+    setEditColor(subgroup.color || '#8b5cf6');
     setEditIsPublic(Boolean(subgroup.isPublic));
     setEditError(null);
   };
@@ -328,6 +351,7 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
         name: editName.trim(),
         description: editDesc.trim(),
         avatar: editAvatar,
+        color: editColor,
         isPublic: editIsPublic,
       });
       setEditingSubgroup(null);
@@ -757,6 +781,93 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                           </button>
                         </>
                       )}
+                      {/* Scelta Colore Sottogruppo (2-3 visibili e puntini per espandere) */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400">
+                            Colore Sottogruppo
+                          </label>
+                          <span className="text-[10px] font-bold" style={{ color: newSubgroupColor }}>
+                            {PRESET_COLORS.find(c => c.hex === newSubgroupColor)?.label || 'Selezionato'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {/* Primi 3 colori visibili */}
+                          {PRESET_COLORS.slice(0, 3).map((c) => (
+                            <button
+                              key={c.hex}
+                              type="button"
+                              onClick={() => setNewSubgroupColor(c.hex)}
+                              title={c.label}
+                              className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                                newSubgroupColor === c.hex
+                                  ? 'ring-2 ring-offset-2 ring-purple-600 dark:ring-offset-neutral-900 scale-110 shadow-xs'
+                                  : 'hover:scale-105 opacity-90 hover:opacity-100'
+                              }`}
+                              style={{ backgroundColor: c.hex }}
+                            >
+                              {newSubgroupColor === c.hex && (
+                                <Check className="w-3.5 h-3.5 text-white stroke-[3px] drop-shadow-xs" />
+                              )}
+                            </button>
+                          ))}
+
+                          {/* Tasto 3 puntini */}
+                          {!showAllColorsCreate ? (
+                            <>
+                              {PRESET_COLORS.slice(3).some((c) => c.hex === newSubgroupColor) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setNewSubgroupColor(newSubgroupColor)}
+                                  title={PRESET_COLORS.find((c) => c.hex === newSubgroupColor)?.label}
+                                  className="w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer ring-2 ring-offset-2 ring-purple-600 dark:ring-offset-neutral-900 scale-110 shadow-xs"
+                                  style={{ backgroundColor: newSubgroupColor }}
+                                >
+                                  <Check className="w-3.5 h-3.5 text-white stroke-[3px] drop-shadow-xs" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setShowAllColorsCreate(true)}
+                                title="Mostra tutti i colori"
+                                className="w-7 h-7 rounded-xl flex items-center justify-center bg-white dark:bg-neutral-800 border border-dashed border-neutral-300 dark:border-neutral-600 text-neutral-500 hover:text-purple-600 transition-all cursor-pointer active:scale-95"
+                              >
+                                <MoreHorizontal className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {PRESET_COLORS.slice(3).map((c) => (
+                                <button
+                                  key={c.hex}
+                                  type="button"
+                                  onClick={() => setNewSubgroupColor(c.hex)}
+                                  title={c.label}
+                                  className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                                    newSubgroupColor === c.hex
+                                      ? 'ring-2 ring-offset-2 ring-purple-600 dark:ring-offset-neutral-900 scale-110 shadow-xs'
+                                      : 'hover:scale-105 opacity-90 hover:opacity-100'
+                                  }`}
+                                  style={{ backgroundColor: c.hex }}
+                                >
+                                  {newSubgroupColor === c.hex && (
+                                    <Check className="w-3.5 h-3.5 text-white stroke-[3px] drop-shadow-xs" />
+                                  )}
+                                </button>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() => setShowAllColorsCreate(false)}
+                                title="Mostra meno"
+                                className="w-7 h-7 rounded-xl flex items-center justify-center bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-400 hover:text-neutral-700 transition-all cursor-pointer"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
                     </div>
                   </div>
 
@@ -972,6 +1083,93 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                     </div>
                   </div>
 
+                  {/* Scelta Colore Sottogruppo in Modifica */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400">
+                        Colore Sottogruppo
+                      </label>
+                      <span className="text-[10px] font-bold" style={{ color: editColor }}>
+                        {PRESET_COLORS.find(c => c.hex === editColor)?.label || 'Selezionato'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {/* Primi 3 colori visibili */}
+                      {PRESET_COLORS.slice(0, 3).map((c) => (
+                        <button
+                          key={c.hex}
+                          type="button"
+                          onClick={() => setEditColor(c.hex)}
+                          title={c.label}
+                          className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                            editColor === c.hex
+                              ? 'ring-2 ring-offset-2 ring-amber-500 dark:ring-offset-neutral-900 scale-110 shadow-xs'
+                              : 'hover:scale-105 opacity-90 hover:opacity-100'
+                          }`}
+                          style={{ backgroundColor: c.hex }}
+                        >
+                          {editColor === c.hex && (
+                            <Check className="w-3.5 h-3.5 text-white stroke-[3px] drop-shadow-xs" />
+                          )}
+                        </button>
+                      ))}
+
+                      {/* Tasto 3 puntini */}
+                      {!showAllColorsEdit ? (
+                        <>
+                          {PRESET_COLORS.slice(3).some((c) => c.hex === editColor) && (
+                            <button
+                              type="button"
+                              onClick={() => setEditColor(editColor)}
+                              title={PRESET_COLORS.find((c) => c.hex === editColor)?.label}
+                              className="w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer ring-2 ring-offset-2 ring-amber-500 dark:ring-offset-neutral-900 scale-110 shadow-xs"
+                              style={{ backgroundColor: editColor }}
+                            >
+                              <Check className="w-3.5 h-3.5 text-white stroke-[3px] drop-shadow-xs" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setShowAllColorsEdit(true)}
+                            title="Mostra tutti i colori"
+                            className="w-7 h-7 rounded-xl flex items-center justify-center bg-white dark:bg-neutral-800 border border-dashed border-neutral-300 dark:border-neutral-600 text-neutral-500 hover:text-amber-600 transition-all cursor-pointer active:scale-95"
+                          >
+                            <MoreHorizontal className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {PRESET_COLORS.slice(3).map((c) => (
+                            <button
+                              key={c.hex}
+                              type="button"
+                              onClick={() => setEditColor(c.hex)}
+                              title={c.label}
+                              className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                                editColor === c.hex
+                                  ? 'ring-2 ring-offset-2 ring-amber-500 dark:ring-offset-neutral-900 scale-110 shadow-xs'
+                                  : 'hover:scale-105 opacity-90 hover:opacity-100'
+                              }`}
+                              style={{ backgroundColor: c.hex }}
+                            >
+                              {editColor === c.hex && (
+                                <Check className="w-3.5 h-3.5 text-white stroke-[3px] drop-shadow-xs" />
+                              )}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setShowAllColorsEdit(false)}
+                            title="Mostra meno"
+                            className="w-7 h-7 rounded-xl flex items-center justify-center bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-400 hover:text-neutral-700 transition-all cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-1">
                       Nome Sottogruppo *
@@ -1111,6 +1309,8 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                           ? 'ml-3 sm:ml-4 pl-2 border-l-2 border-purple-300/80 dark:border-purple-700/80'
                           : 'ml-5 sm:ml-7 pl-2 border-l-2 border-purple-400/80 dark:border-purple-600/80';
 
+                      const itemColor = subgroup.color || '#8b5cf6';
+
                       return (
                         <div
                           key={subgroup.id}
@@ -1119,9 +1319,15 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                           <div
                             className={`rounded-xl border transition-all overflow-hidden ${
                               isSelected
-                                ? 'bg-purple-50/90 dark:bg-purple-950/40 border-purple-500 dark:border-purple-600 shadow-2xs'
+                                ? 'shadow-xs'
                                 : 'bg-white dark:bg-neutral-800/70 border-neutral-200 dark:border-neutral-700/80 hover:border-neutral-300 dark:hover:border-neutral-600'
                             }`}
+                            style={{
+                              borderLeftWidth: '5px',
+                              borderLeftColor: itemColor,
+                              borderColor: isSelected ? itemColor : undefined,
+                              backgroundColor: isSelected ? `${itemColor}15` : undefined,
+                            }}
                           >
                             <div
                               onClick={() => {
@@ -1157,12 +1363,20 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                   </span>
                                 ) : null}
 
-                                <GroupAvatar
-                                  avatar={subgroup.avatar}
-                                  name={subgroup.name}
-                                  size="sm"
-                                  fallbackEmoji="📁"
-                                />
+                                <div
+                                  className="p-1 rounded-xl shrink-0 transition-all flex items-center justify-center"
+                                  style={{
+                                    backgroundColor: `${itemColor}18`,
+                                    border: `1.5px solid ${itemColor}35`,
+                                  }}
+                                >
+                                  <GroupAvatar
+                                    avatar={subgroup.avatar}
+                                    name={subgroup.name}
+                                    size="sm"
+                                    fallbackEmoji="📁"
+                                  />
+                                </div>
 
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -1220,7 +1434,10 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                 {/* Riga superiore: stato attivo, copia codice, entra, matita e cestino */}
                                 <div className="flex items-center gap-1">
                                   {isSelected && (
-                                    <span className="w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center shrink-0">
+                                    <span
+                                      className="w-4 h-4 rounded-full text-white flex items-center justify-center shrink-0"
+                                      style={{ backgroundColor: itemColor }}
+                                    >
                                       <Check className="w-2.5 h-2.5 stroke-[3px]" />
                                     </span>
                                   )}

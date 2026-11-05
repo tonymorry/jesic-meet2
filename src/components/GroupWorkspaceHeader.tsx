@@ -14,6 +14,7 @@
 import React, { useState, useRef } from 'react';
 import { Group, User, Subgroup } from '../types';
 import { GroupAvatar } from './GroupAvatar';
+import { PRESET_COLORS } from './SubgroupsDrawer';
 import {
   ArrowLeft,
   Users,
@@ -45,7 +46,7 @@ export interface GroupWorkspaceHeaderProps {
   onDeleteGroup?: (groupId: string) => Promise<boolean | void>;
   onUpdateSubgroup?: (
     subgroupId: string,
-    data: { name: string; description?: string; avatar?: string; isPublic?: boolean }
+    data: { name: string; description?: string; avatar?: string; color?: string; isPublic?: boolean }
   ) => Promise<boolean | void>;
   onDeleteSubgroup?: (subgroupId: string) => Promise<boolean | void>;
 }
@@ -77,7 +78,9 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editAvatar, setEditAvatar] = useState('📁');
+  const [editColor, setEditColor] = useState('#8b5cf6');
   const [showAllIcons, setShowAllIcons] = useState(false);
+  const [showAllColors, setShowAllColors] = useState(false);
   const [editIsPublic, setEditIsPublic] = useState(false);
   const [isSavingCustomization, setIsSavingCustomization] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -145,6 +148,7 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
       setEditName(activeSubgroup.name);
       setEditDesc(activeSubgroup.description || '');
       setEditAvatar(activeSubgroup.avatar || '📁');
+      setEditColor(activeSubgroup.color || '#8b5cf6');
       setEditIsPublic(Boolean(activeSubgroup.isPublic));
     } else {
       setEditName(activeGroup.name);
@@ -167,6 +171,7 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
           name: clean,
           description: editDesc.trim(),
           avatar: editAvatar,
+          color: editColor,
           isPublic: editIsPublic,
         });
       } else if (onUpdateGroup) {
@@ -223,9 +228,19 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
     chain.forEach((s) => breadcrumbs.push({ id: s.id, name: s.name }));
   }
 
+  const subColor = activeSubgroup?.color || '#8b5cf6';
+
   return (
     <>
-      <div className="bg-white dark:bg-neutral-900 border-b border-neutral-200/90 dark:border-neutral-800 shadow-2xs transition-colors mb-3.5 sm:mb-5 rounded-2xl sm:rounded-3xl p-3 sm:p-5">
+      <div
+        className="bg-white dark:bg-neutral-900 border-b border-neutral-200/90 dark:border-neutral-800 shadow-2xs transition-colors mb-3.5 sm:mb-5 rounded-2xl sm:rounded-3xl p-3 sm:p-5 relative overflow-hidden"
+        style={activeSubgroup ? {
+          borderLeftWidth: '6px',
+          borderLeftColor: subColor,
+          backgroundImage: `linear-gradient(to right, ${subColor}14, transparent 55%)`,
+          boxShadow: `0 4px 20px -2px ${subColor}25`,
+        } : undefined}
+      >
         <div className="flex items-center justify-between gap-2.5 sm:gap-4">
           {/* Tasto Torna Indietro + Avatar + Nome Gruppo */}
           <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1">
@@ -245,8 +260,15 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
             </button>
 
             <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
-              {/* Avatar Icona o Immagine ingrandito: del Sottogruppo se attivo, altrimenti del Gruppo Principale */}
-              <div className="shrink-0">
+              {/* Quadratone Avatar Icona o Immagine ingrandito: del Sottogruppo se attivo, altrimenti del Gruppo Principale */}
+              <div
+                className="shrink-0 p-1 sm:p-1.5 rounded-2xl transition-all flex items-center justify-center"
+                style={activeSubgroup ? {
+                  backgroundColor: `${subColor}22`,
+                  border: `2px solid ${subColor}55`,
+                  boxShadow: `0 2px 8px ${subColor}25`,
+                } : undefined}
+              >
                 <GroupAvatar
                   avatar={activeSubgroup ? (activeSubgroup.avatar || '📁') : (activeGroup.avatar || '👥')}
                   name={activeSubgroup ? activeSubgroup.name : activeGroup.name}
@@ -560,6 +582,95 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
                   )}
                 </div>
               </div>
+
+              {/* Selezione Colore Sottogruppo (solo per sottogruppi, con 2/3 visibili e puntini per espandere) */}
+              {activeSubgroup && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                      Colore Sottogruppo
+                    </label>
+                    <span className="text-xs font-bold" style={{ color: editColor }}>
+                      {PRESET_COLORS.find((c) => c.hex === editColor)?.label || 'Selezionato'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {/* Primi 3 colori visibili */}
+                    {PRESET_COLORS.slice(0, 3).map((c) => (
+                      <button
+                        key={c.hex}
+                        type="button"
+                        onClick={() => setEditColor(c.hex)}
+                        title={c.label}
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                          editColor === c.hex
+                            ? 'ring-2 ring-offset-2 ring-purple-600 dark:ring-offset-neutral-900 scale-110 shadow-xs'
+                            : 'hover:scale-105 opacity-90 hover:opacity-100'
+                        }`}
+                        style={{ backgroundColor: c.hex }}
+                      >
+                        {editColor === c.hex && (
+                          <Check className="w-4 h-4 text-white stroke-[3px] drop-shadow-xs" />
+                        )}
+                      </button>
+                    ))}
+
+                    {/* Tasto 3 puntini */}
+                    {!showAllColors ? (
+                      <>
+                        {PRESET_COLORS.slice(3).some((c) => c.hex === editColor) && (
+                          <button
+                            type="button"
+                            onClick={() => setEditColor(editColor)}
+                            title={PRESET_COLORS.find((c) => c.hex === editColor)?.label}
+                            className="w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ring-2 ring-offset-2 ring-purple-600 dark:ring-offset-neutral-900 scale-110 shadow-xs"
+                            style={{ backgroundColor: editColor }}
+                          >
+                            <Check className="w-4 h-4 text-white stroke-[3px] drop-shadow-xs" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setShowAllColors(true)}
+                          title="Mostra tutti i colori"
+                          className="w-8 h-8 rounded-xl flex items-center justify-center bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 border border-dashed border-neutral-300 dark:border-neutral-600 transition-all shrink-0 cursor-pointer active:scale-95"
+                        >
+                          <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {PRESET_COLORS.slice(3).map((c) => (
+                          <button
+                            key={c.hex}
+                            type="button"
+                            onClick={() => setEditColor(c.hex)}
+                            title={c.label}
+                            className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                              editColor === c.hex
+                                ? 'ring-2 ring-offset-2 ring-purple-600 dark:ring-offset-neutral-900 scale-110 shadow-xs'
+                                : 'hover:scale-105 opacity-90 hover:opacity-100'
+                            }`}
+                            style={{ backgroundColor: c.hex }}
+                          >
+                            {editColor === c.hex && (
+                              <Check className="w-4 h-4 text-white stroke-[3px] drop-shadow-xs" />
+                            )}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setShowAllColors(false)}
+                          title="Mostra meno"
+                          className="w-8 h-8 rounded-xl flex items-center justify-center bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 border border-neutral-200 dark:border-neutral-700 transition-all shrink-0 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Nome */}
               <div>

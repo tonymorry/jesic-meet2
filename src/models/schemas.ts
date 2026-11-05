@@ -169,6 +169,7 @@ export interface ISubgroup {
   name: string;
   description?: string;
   avatar?: string;
+  color?: string;
   isPublic?: boolean;
   code?: string;
   members?: string[];
@@ -222,6 +223,10 @@ const SubgroupSubSchema = new Schema<ISubgroup>(
     avatar: {
       type: String,
       default: '📁',
+    },
+    color: {
+      type: String,
+      default: '#8b5cf6',
     },
     isPublic: {
       type: Boolean,

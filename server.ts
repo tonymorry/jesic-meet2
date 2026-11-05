@@ -508,6 +508,7 @@ app.get('/api/groups', async (req: Request, res: Response) => {
         name: s.name,
         description: s.description || '',
         avatar: s.avatar || '📁',
+        color: s.color || '#8b5cf6',
         isPublic: Boolean(s.isPublic),
         code: s.code,
         parentId: s.parentId ? String(s.parentId) : null,
@@ -1068,7 +1069,7 @@ app.post('/api/groups/:id/members/:memberId/role', handleUpdateGroupMemberRole);
 // POST /api/groups/:id/subgroups - Creazione Sottogruppo (Solo Responsabile o Creatore del gruppo)
 app.post('/api/groups/:id/subgroups', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, description, avatar, isPublic, parentId } = req.body;
+  const { name, description, avatar, color, isPublic, parentId } = req.body;
   const requesterId = req.body?.requesterId || req.body?.creatorId || req.body?.userId;
 
   if (!name || !name.trim()) {
@@ -1148,6 +1149,7 @@ app.post('/api/groups/:id/subgroups', async (req: Request, res: Response) => {
       name: name.trim(),
       description: description ? description.trim() : '',
       avatar: avatar || '📁',
+      color: color || '#8b5cf6',
       isPublic: isPub,
       code: subCode,
       parentId: actualParentId,
@@ -1169,6 +1171,7 @@ app.post('/api/groups/:id/subgroups', async (req: Request, res: Response) => {
       name: s.name,
       description: s.description || '',
       avatar: s.avatar || '📁',
+      color: s.color || '#8b5cf6',
       isPublic: Boolean(s.isPublic),
       code: s.code,
       parentId: s.parentId ? String(s.parentId) : null,
@@ -1436,7 +1439,7 @@ app.delete('/api/groups/:id/subgroups/:subgroupId', async (req: Request, res: Re
 // PATCH /api/groups/:id/subgroups/:subgroupId - Modifica e personalizzazione Sottogruppo (Responsabile o Creatore)
 app.patch('/api/groups/:id/subgroups/:subgroupId', async (req: Request, res: Response) => {
   const { id, subgroupId } = req.params;
-  const { name, description, avatar, isPublic, requesterId } = req.body;
+  const { name, description, avatar, color, isPublic, requesterId } = req.body;
 
   try {
     const group = await GroupModel.findOne({ $or: [{ _id: id }, { id }] });
@@ -1461,6 +1464,7 @@ app.patch('/api/groups/:id/subgroups/:subgroupId', async (req: Request, res: Res
     if (name && name.trim()) subgroup.name = name.trim();
     if (description !== undefined) subgroup.description = description.trim();
     if (avatar) subgroup.avatar = avatar;
+    if (color) subgroup.color = color;
     if (typeof isPublic === 'boolean') {
       subgroup.isPublic = isPublic;
     }
