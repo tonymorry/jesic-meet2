@@ -48,6 +48,117 @@ import {
   isChatMessageExpired,
 } from '../utils/chatCache';
 
+/**
+ * Rileva il miglior formato audio supportato dal browser per la registrazione vocale.
+ * Su iPhone/iOS e Safari predilige 'audio/mp4' (AAC), mentre su Chrome/Android 'audio/webm;codecs=opus'.
+ */
+const getBestAudioMimeType = (): string => {
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) {
+    return '';
+  }
+  const candidates = [
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
+    'audio/aac',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/wav',
+  ];
+  for (const candidate of candidates) {
+    if (MediaRecorder.isTypeSupported(candidate)) {
+      return candidate;
+    }
+  }
+  return '';
+};
+
+/**
+ * Converte in modo sicuro una stringa data URL (base64) in un oggetto Blob reale.
+ * Fondamentale per Safari/iOS che non supporta data URL lunghe con new Audio().
+ */
+const base64ToBlob = (base64DataUrl: string): Blob => {
+  try {
+    const parts = base64DataUrl.split(',');
+    const mimeMatch = parts[0]?.match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'audio/mp4';
+    const base64Str = parts[1] || parts[0];
+    const byteCharacters = atob(base64Str);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mime });
+  } catch (err) {
+    console.warn('Errore conversione base64ToBlob:', err);
+    return new Blob([], { type: 'audio/mp4' });
+  }
+};
+
+/**
+ * Rimpicciolisce, comprime e converte automaticamente in JPEG leggero qualsiasi immagine
+ * (inclusi scatti da 48MP o file da 15-25MB scattati da iPhone o fotocamere Android).
+ */
+const compressAndOptimizeImage = async (file: File): Promise<{ url: string; size: number }> => {
+  return new Promise((resolve, reject) => {
+    if (file.type === 'image/svg+xml') {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve({ url: e.target?.result as string, size: file.size });
+      reader.onerror = () => reject(new Error('Errore lettura file SVG'));
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Impossibile leggere il file immagine dal dispositivo'));
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Formato immagine non supportato o corrotto'));
+      img.onload = () => {
+        try {
+          const MAX_DIM = 1600;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height = Math.round((height * MAX_DIM) / width);
+              width = MAX_DIM;
+            } else {
+              width = Math.round((width * MAX_DIM) / height);
+              height = MAX_DIM;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve({ url: e.target?.result as string, size: file.size });
+            return;
+          }
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Converti in JPEG standard universale a qualità 0.82
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          const approxBytes = Math.round((compressedDataUrl.length * 3) / 4);
+          resolve({ url: compressedDataUrl, size: approxBytes });
+        } catch (err) {
+          console.warn('Fallback compressione automatica:', err);
+          resolve({ url: e.target?.result as string, size: file.size });
+        }
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+};
+
 export interface GroupChatViewProps {
   activeGroup: Group;
   activeSubgroup: Subgroup | null;
@@ -107,20 +218,26 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
     activeGroup.creatorId === currentUser.id ||
     activeGroup.members?.some((m) => m.userId === currentUser.id && m.role === 'admin');
 
-  // Allegato in preparazione
+  // Allegato in preparazione & Stato Compressione
   const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null);
+  const [isOptimizingImage, setIsOptimizingImage] = useState(false);
 
-  // Registrazione Audio / Nota Vocale
+  // Registrazione Audio / Nota Vocale (con timestamp preciso)
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingStartTimeRef = useRef<number>(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<any>(null);
 
-  // Riproduzione Audio in-chat
+  // Riproduzione Audio in-chat (supporto universale iOS Safari + Android + Web Audio fallback)
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const [audioProgress, setAudioProgress] = useState(0);
+  const audioBlobUrlsCache = useRef<Map<string, string>>(new Map());
+  const webAudioContextRef = useRef<AudioContext | null>(null);
+  const webAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const webAudioAnimRef = useRef<any>(null);
 
   // Anteprima Immagine a schermo intero (Lightbox)
   const [previewImage, setPreviewImage] = useState<{ url: string; name?: string } | null>(null);
@@ -397,28 +514,35 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
     previousMessagesLengthRef.current = messages.length;
   }, [messages.length]);
 
-  // Gestione Selezione Immagine
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Gestione Selezione Immagine con Compressione Automatica per Smartphone (anche foto 48MP o 20MB)
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 8 * 1024 * 1024) {
-      alert('L\'immagine non può superare 8MB.');
+    // Reset input così da poter selezionare la stessa foto se necessario
+    e.target.value = '';
+
+    // Accetta file anche fino a 50MB (scatti ad altissima risoluzione da fotocamera)
+    if (file.size > 50 * 1024 * 1024) {
+      alert("Il file immagine non può superare 50MB.");
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const url = event.target?.result as string;
+    setIsOptimizingImage(true);
+    try {
+      const { url, size } = await compressAndOptimizeImage(file);
       setPendingAttachment({
         type: 'image',
         url,
-        name: file.name,
-        size: file.size,
+        name: file.name.replace(/\.[^/.]+$/, '') + '.jpg',
+        size,
       });
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    } catch (err) {
+      console.error('Errore elaborazione immagine:', err);
+      alert('Impossibile elaborare questa immagine. Riprova con un altro scatto.');
+    } finally {
+      setIsOptimizingImage(false);
+    }
   };
 
   // Gestione Selezione File / Documento
@@ -426,8 +550,8 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 15 * 1024 * 1024) {
-      alert('Il file non può superare 15MB.');
+    if (file.size > 30 * 1024 * 1024) {
+      alert('Il file non può superare 30MB.');
       return;
     }
 
@@ -445,33 +569,60 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
     e.target.value = '';
   };
 
-  // Registrazione Vocale (MediaRecorder)
+  // Registrazione Vocale (MediaRecorder con supporto universale iOS/Apple e Android)
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
       audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
+      const preferredMime = getBestAudioMimeType();
+      const recorderOptions: MediaRecorderOptions = {};
+      if (preferredMime) {
+        recorderOptions.mimeType = preferredMime;
+      }
+
+      let mediaRecorder: MediaRecorder;
+      try {
+        mediaRecorder = new MediaRecorder(stream, recorderOptions);
+      } catch {
+        mediaRecorder = new MediaRecorder(stream);
+      }
       mediaRecorderRef.current = mediaRecorder;
+      recordingStartTimeRef.current = Date.now();
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Usa il mimetype effettivo registrato dal browser (su iPhone 'audio/mp4', su Android 'audio/webm')
+        const actualMime = mediaRecorder.mimeType || preferredMime || 'audio/mp4';
+        const audioBlob = new Blob(audioChunksRef.current, { type: actualMime });
         stream.getTracks().forEach((track) => track.stop());
+
+        const durationSec = Math.max(
+          1,
+          Math.round((Date.now() - recordingStartTimeRef.current) / 1000)
+        );
 
         const reader = new FileReader();
         reader.onloadend = () => {
           const base64Audio = reader.result as string;
-          sendAudioMessage(base64Audio, recordingSeconds);
+          sendAudioMessage(base64Audio, durationSec);
         };
         reader.readAsDataURL(audioBlob);
       };
 
-      mediaRecorder.start();
+      // Timeslice di 250ms fondamentale per Safari iOS per raccogliere buffer continui
+      mediaRecorder.start(250);
       setIsRecording(true);
       setRecordingSeconds(0);
       recordingTimerRef.current = setInterval(() => {
@@ -479,7 +630,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       }, 1000);
     } catch (err) {
       console.warn('Errore accesso microfono:', err);
-      alert('Impossibile accedere al microfono per registrare la nota vocale.');
+      alert('Impossibile accedere al microfono per registrare la nota vocale. Verifica i permessi nelle impostazioni del browser.');
     }
   };
 
@@ -752,38 +903,150 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
     }
   };
 
-  // Gestione Riproduzione Audio in-chat
-  const handleTogglePlayAudio = (messageId: string, audioUrl: string) => {
+  // Pulizia audio all'unmount
+  useEffect(() => {
+    return () => {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+      if (webAudioSourceRef.current) {
+        try { webAudioSourceRef.current.stop(); } catch {}
+        webAudioSourceRef.current = null;
+      }
+      if (webAudioContextRef.current && webAudioContextRef.current.state !== 'closed') {
+        try { webAudioContextRef.current.close(); } catch {}
+      }
+      if (webAudioAnimRef.current) {
+        cancelAnimationFrame(webAudioAnimRef.current);
+      }
+      audioBlobUrlsCache.current.forEach((url) => {
+        try { URL.revokeObjectURL(url); } catch {}
+      });
+      audioBlobUrlsCache.current.clear();
+    };
+  }, []);
+
+  // Gestione Riproduzione Audio in-chat (supporto universale iOS Safari + Android + PC con Web Audio fallback)
+  const handleTogglePlayAudio = async (messageId: string, audioUrl: string) => {
     if (playingAudioId === messageId) {
-      audioPlayerRef.current?.pause();
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      if (webAudioSourceRef.current) {
+        try { webAudioSourceRef.current.stop(); } catch {}
+        webAudioSourceRef.current = null;
+      }
+      if (webAudioAnimRef.current) {
+        cancelAnimationFrame(webAudioAnimRef.current);
+      }
       setPlayingAudioId(null);
       return;
     }
 
     if (audioPlayerRef.current) {
       audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+    }
+    if (webAudioSourceRef.current) {
+      try { webAudioSourceRef.current.stop(); } catch {}
+      webAudioSourceRef.current = null;
+    }
+    if (webAudioAnimRef.current) {
+      cancelAnimationFrame(webAudioAnimRef.current);
     }
 
-    const audio = new Audio(audioUrl);
-    audioPlayerRef.current = audio;
     setPlayingAudioId(messageId);
     setAudioProgress(0);
 
-    audio.ontimeupdate = () => {
-      if (audio.duration) {
-        setAudioProgress((audio.currentTime / audio.duration) * 100);
+    // Risolvi l'URL riproducibile (per iOS Safari crea e memorizza in cache un Blob Object URL)
+    let playableUrl = audioUrl;
+    if (audioUrl.startsWith('data:')) {
+      const cached = audioBlobUrlsCache.current.get(audioUrl);
+      if (cached) {
+        playableUrl = cached;
+      } else {
+        const blob = base64ToBlob(audioUrl);
+        const objUrl = URL.createObjectURL(blob);
+        audioBlobUrlsCache.current.set(audioUrl, objUrl);
+        playableUrl = objUrl;
       }
-    };
+    }
 
-    audio.onended = () => {
-      setPlayingAudioId(null);
-      setAudioProgress(0);
-    };
+    try {
+      const audio = new Audio();
+      audioPlayerRef.current = audio;
+      audio.preload = 'auto';
+      audio.setAttribute('playsinline', 'true');
+      (audio as any).playsInline = true;
+      audio.src = playableUrl;
 
-    audio.play().catch((e) => {
-      console.warn('Errore riproduzione audio:', e);
-      setPlayingAudioId(null);
-    });
+      audio.ontimeupdate = () => {
+        if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+          setAudioProgress((audio.currentTime / audio.duration) * 100);
+        }
+      };
+
+      audio.onended = () => {
+        setPlayingAudioId(null);
+        setAudioProgress(0);
+      };
+
+      await audio.play();
+    } catch (playErr) {
+      console.warn('Riproduzione HTML5 Audio fallita, fallback Web Audio per Apple/iOS:', playErr);
+
+      // Fallback avanzato Web Audio API (decodifica buffer audio per browser o versioni iOS restrittive)
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) throw new Error('Web Audio non supportato');
+        if (!webAudioContextRef.current || webAudioContextRef.current.state === 'closed') {
+          webAudioContextRef.current = new AudioContextClass();
+        }
+        const ctx = webAudioContextRef.current;
+        if (ctx.state === 'suspended') {
+          await ctx.resume();
+        }
+
+        const res = await fetch(playableUrl);
+        const arrayBuffer = await res.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+        webAudioSourceRef.current = source;
+
+        const startTime = ctx.currentTime;
+        const duration = audioBuffer.duration;
+
+        source.onended = () => {
+          setPlayingAudioId(null);
+          setAudioProgress(0);
+          if (webAudioAnimRef.current) {
+            cancelAnimationFrame(webAudioAnimRef.current);
+          }
+        };
+
+        source.start(0);
+
+        const trackProgress = () => {
+          if (!webAudioContextRef.current || !webAudioSourceRef.current) return;
+          const elapsed = webAudioContextRef.current.currentTime - startTime;
+          if (elapsed < duration) {
+            setAudioProgress((elapsed / duration) * 100);
+            webAudioAnimRef.current = requestAnimationFrame(trackProgress);
+          } else {
+            setAudioProgress(100);
+          }
+        };
+        webAudioAnimRef.current = requestAnimationFrame(trackProgress);
+      } catch (fallbackErr) {
+        console.error('Errore riproduzione anche con Web Audio API:', fallbackErr);
+        setPlayingAudioId(null);
+        setAudioProgress(0);
+      }
+    }
   };
 
   const formatMessageTime = (isoString?: string) => {
@@ -1299,11 +1562,18 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                           onClick={() =>
                             setPreviewImage({
                               url: msg.attachment!.url,
-                              name: msg.attachment!.name,
+                               name: msg.attachment!.name,
                             })
                           }
                           className="w-full max-h-72 object-cover rounded-xl hover:scale-101 transition-transform"
                         />
+                        {/* Indicatore visivo durante il caricamento/invio della foto su MongoDB */}
+                        {msg.id.startsWith('msg-opt-') && (
+                          <div className="absolute inset-0 bg-black/45 backdrop-blur-[1px] flex items-center justify-center gap-2 text-white text-xs font-bold rounded-xl pointer-events-none">
+                            <Loader2 className="w-5 h-5 animate-spin text-white" />
+                            <span>Invio foto in corso...</span>
+                          </div>
+                        )}
                         <div
                           onClick={() =>
                             setPreviewImage({
@@ -1320,7 +1590,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 
                     {/* 2. ALLEGATO NOTA VOCALE / AUDIO */}
                     {msg.attachment?.type === 'audio' && (
-                      <div className="mb-2 p-2 rounded-xl bg-black/5 dark:bg-white/5 flex items-center gap-3">
+                      <div className="mb-2 p-2 rounded-xl bg-black/5 dark:bg-white/5 flex items-center gap-3 relative">
                         <button
                           type="button"
                           onClick={() =>
@@ -1349,6 +1619,12 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                             <span className="flex items-center gap-1 font-mono">
                               <Volume2 className="w-3 h-3 text-[#00a884]" />
                               <span>Nota Vocale</span>
+                              {msg.id.startsWith('msg-opt-') && (
+                                <span className="text-[9px] text-[#00a884] font-bold flex items-center gap-1 ml-1.5">
+                                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                  <span>Invio audio...</span>
+                                </span>
+                              )}
                             </span>
                             <span className="font-mono">
                               {msg.attachment.duration
@@ -1450,7 +1726,15 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                       )}
                       <span>{formatMessageTime(msg.createdAt)}</span>
                       {isMe && (
-                        <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb]" />
+                        msg.id.startsWith('msg-opt-') ? (
+                          <span title="Invio in corso su MongoDB..." className="flex items-center text-neutral-400">
+                            <Clock className="w-3 h-3 animate-pulse" />
+                          </span>
+                        ) : (
+                          <span title="Consegnato e salvato" className="flex items-center">
+                            <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb]" />
+                          </span>
+                        )
                       )}
                     </div>
                   </div>
@@ -1521,6 +1805,32 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+
+      {/* INDICATORE OTTIMIZZAZIONE FOTO IN CORSO */}
+      {isOptimizingImage && (
+        <div className="px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-800/60 flex items-center gap-2.5 animate-in slide-in-from-bottom-2">
+          <Loader2 className="w-4 h-4 animate-spin text-[#f23e2e] shrink-0" />
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-neutral-900 dark:text-white">
+              Ottimizzazione e compressione foto in corso...
+            </p>
+            <p className="text-[10px] text-neutral-500 dark:text-neutral-400">
+              Conversione in formato standard leggero ad alta definizione
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* INDICATORE INVIO IN CORSO (FOTO / AUDIO / TESTO) */}
+      {isSending && (
+        <div className="px-4 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 border-t border-emerald-200 dark:border-emerald-800/60 flex items-center justify-between text-xs font-semibold text-emerald-800 dark:text-emerald-300 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#00a884] shrink-0" />
+            <span>Salvataggio e sincronizzazione in corso...</span>
+          </div>
+          <span className="text-[10px] opacity-75 font-mono">Invio ⚡</span>
         </div>
       )}
 
