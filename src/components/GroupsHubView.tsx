@@ -33,6 +33,7 @@ import {
   ExternalLink,
   Image as ImageIcon,
   Upload,
+  MoreHorizontal,
 } from 'lucide-react';
 
 interface GroupsHubViewProps {
@@ -64,6 +65,7 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDesc, setNewGroupDesc] = useState('');
   const [selectedIcon, setSelectedIcon] = useState('👥');
+  const [showAllIcons, setShowAllIcons] = useState(false);
   const [isPublicGroup, setIsPublicGroup] = useState(false); // Default: Privato
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -205,6 +207,13 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
 
   return (
     <div className="space-y-4 pb-24 animate-in fade-in">
+      {/* Saluto Utente nella Home dell'App */}
+      <div className="pt-1 pb-1 px-1">
+        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-neutral-900 dark:text-white">
+          Ciao, {currentUser.name} 👋
+        </h1>
+      </div>
+
       {/* Header Sezione Gruppi con Azioni Rapide */}
       <div className="bg-white dark:bg-neutral-900 rounded-3xl p-5 sm:p-6 border border-neutral-200/90 dark:border-neutral-800 shadow-xs space-y-4 transition-colors">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -743,7 +752,8 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
                     <ImageIcon className="w-4 h-4 text-[#f23e2e]" />
                   </button>
 
-                  {PRESET_ICONS.map((icon) => (
+                  {/* Prime 2 icone visibili subito */}
+                  {PRESET_ICONS.slice(0, 2).map((icon) => (
                     <button
                       key={icon}
                       type="button"
@@ -757,6 +767,55 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
                       {icon}
                     </button>
                   ))}
+
+                  {/* Tasto 3 puntini per mostrare tutto il resto */}
+                  {!showAllIcons ? (
+                    <>
+                      {/* Se l'utente aveva precedentemente selezionato un'icona oltre le prime 2, mostrala comunque come attiva */}
+                      {PRESET_ICONS.slice(2).includes(selectedIcon) && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedIcon(selectedIcon)}
+                          className="w-9 h-9 rounded-xl flex items-center justify-center text-lg transition-all shrink-0 cursor-pointer bg-red-50 dark:bg-red-950/60 border-2 border-[#f23e2e] scale-110 shadow-xs"
+                        >
+                          {selectedIcon}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowAllIcons(true)}
+                        title="Mostra tutte le altre icone"
+                        className="w-9 h-9 rounded-xl flex items-center justify-center bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 border border-dashed border-neutral-300 dark:border-neutral-600 transition-all shrink-0 cursor-pointer active:scale-95"
+                      >
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {PRESET_ICONS.slice(2).map((icon) => (
+                        <button
+                          key={icon}
+                          type="button"
+                          onClick={() => setSelectedIcon(icon)}
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg transition-all shrink-0 cursor-pointer ${
+                            selectedIcon === icon
+                              ? 'bg-red-50 dark:bg-red-950/60 border-2 border-[#f23e2e] scale-110 shadow-xs'
+                              : 'bg-neutral-100 dark:bg-neutral-800 border border-transparent hover:scale-105'
+                          }`}
+                        >
+                          {icon}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setShowAllIcons(false)}
+                        title="Mostra meno icone"
+                        className="w-9 h-9 rounded-xl flex items-center justify-center bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 border border-neutral-200 dark:border-neutral-700 transition-all shrink-0 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 

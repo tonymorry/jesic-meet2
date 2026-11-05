@@ -30,6 +30,7 @@ import {
   Upload,
   ChevronDown,
   ChevronRight,
+  MoreHorizontal,
 } from 'lucide-react';
 
 export interface SubgroupsDrawerProps {
@@ -76,6 +77,8 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
   const [newSubgroupName, setNewSubgroupName] = useState('');
   const [newSubgroupDesc, setNewSubgroupDesc] = useState('');
   const [newSubgroupAvatar, setNewSubgroupAvatar] = useState('📁');
+  const [showAllIconsCreate, setShowAllIconsCreate] = useState(false);
+  const [showAllIconsEdit, setShowAllIconsEdit] = useState(false);
   const [newSubgroupIsPublic, setNewSubgroupIsPublic] = useState(false);
   const [newSubgroupCustomCode, setNewSubgroupCustomCode] = useState('');
   const [newSubgroupParentId, setNewSubgroupParentId] = useState<string | null>(null);
@@ -691,7 +694,8 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                         <ImageIcon className="w-3.5 h-3.5 text-purple-600" />
                       </button>
 
-                      {PRESET_ICONS.map((icon) => (
+                      {/* Prime 2 icone visibili */}
+                      {PRESET_ICONS.slice(0, 2).map((icon) => (
                         <button
                           key={icon}
                           type="button"
@@ -705,6 +709,54 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                           {icon}
                         </button>
                       ))}
+
+                      {/* Tasto 3 puntini */}
+                      {!showAllIconsCreate ? (
+                        <>
+                          {PRESET_ICONS.slice(2).includes(newSubgroupAvatar) && (
+                            <button
+                              type="button"
+                              onClick={() => setNewSubgroupAvatar(newSubgroupAvatar)}
+                              className="w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-all cursor-pointer bg-purple-200 dark:bg-purple-900 border-2 border-purple-600 scale-105"
+                            >
+                              {newSubgroupAvatar}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setShowAllIconsCreate(true)}
+                            title="Mostra altre icone"
+                            className="w-8 h-8 rounded-xl flex items-center justify-center bg-white dark:bg-neutral-800 border border-dashed border-neutral-300 dark:border-neutral-600 text-neutral-500 hover:text-purple-600 transition-all cursor-pointer active:scale-95"
+                          >
+                            <MoreHorizontal className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {PRESET_ICONS.slice(2).map((icon) => (
+                            <button
+                              key={icon}
+                              type="button"
+                              onClick={() => setNewSubgroupAvatar(icon)}
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-all cursor-pointer ${
+                                newSubgroupAvatar === icon
+                                  ? 'bg-purple-200 dark:bg-purple-900 border-2 border-purple-600 scale-105'
+                                  : 'bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700'
+                              }`}
+                            >
+                              {icon}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setShowAllIconsCreate(false)}
+                            title="Mostra meno"
+                            className="w-8 h-8 rounded-xl flex items-center justify-center bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-400 hover:text-neutral-700 transition-all cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -854,7 +906,8 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                       Icona
                     </label>
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      {PRESET_ICONS.map((icon) => (
+                      {/* Prime 2 icone visibili */}
+                      {PRESET_ICONS.slice(0, 2).map((icon) => (
                         <button
                           key={icon}
                           type="button"
@@ -868,6 +921,54 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                           {icon}
                         </button>
                       ))}
+
+                      {/* Tasto 3 puntini */}
+                      {!showAllIconsEdit ? (
+                        <>
+                          {PRESET_ICONS.slice(2).includes(editAvatar) && (
+                            <button
+                              type="button"
+                              onClick={() => setEditAvatar(editAvatar)}
+                              className="w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-all cursor-pointer bg-amber-200 dark:bg-amber-900 border-2 border-amber-600 scale-105"
+                            >
+                              {editAvatar}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setShowAllIconsEdit(true)}
+                            title="Mostra altre icone"
+                            className="w-8 h-8 rounded-xl flex items-center justify-center bg-white dark:bg-neutral-800 border border-dashed border-neutral-300 dark:border-neutral-600 text-neutral-500 hover:text-amber-600 transition-all cursor-pointer active:scale-95"
+                          >
+                            <MoreHorizontal className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {PRESET_ICONS.slice(2).map((icon) => (
+                            <button
+                              key={icon}
+                              type="button"
+                              onClick={() => setEditAvatar(icon)}
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm transition-all cursor-pointer ${
+                                editAvatar === icon
+                                  ? 'bg-amber-200 dark:bg-amber-900 border-2 border-amber-600 scale-105'
+                                  : 'bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700'
+                              }`}
+                            >
+                              {icon}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setShowAllIconsEdit(false)}
+                            title="Mostra meno"
+                            className="w-8 h-8 rounded-xl flex items-center justify-center bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-400 hover:text-neutral-700 transition-all cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 

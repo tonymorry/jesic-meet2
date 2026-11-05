@@ -85,13 +85,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="flex flex-col gap-5 pb-8 max-w-md mx-auto sm:max-w-xl md:max-w-4xl lg:max-w-6xl xl:max-w-7xl px-4 sm:px-6 pt-2">
-      
-      {/* Saluto */}
-      <div className="pt-2 pb-1 px-1">
-        <h1 className="text-2xl font-black tracking-tight text-neutral-900 dark:text-white">
-          Ciao, {currentUser.name} 👋
-        </h1>
-      </div>
 
       {/* Scheda Esclusiva Admin Clienti del Gruppo (Accesso rapido a Richieste Clienti) */}
       {isGroupClientAdmin && onNavigateToRequests && (
@@ -127,13 +120,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       )}
 
       {/* Tabs Fluidi: "Creati da me" vs "I miei inviti" */}
-      <div className="flex p-1 bg-neutral-200/60 dark:bg-neutral-800/80 rounded-2xl border border-neutral-200/80 dark:border-neutral-700/60">
+      <div className="flex p-1 bg-neutral-200/50 dark:bg-neutral-800/80 rounded-2xl border border-neutral-200/60 dark:border-neutral-700/60">
         <button
           type="button"
           onClick={() => setActiveTab('created_by_me')}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-extrabold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'created_by_me'
-              ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-sm'
+              ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-black'
               : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
           }`}
         >
@@ -141,8 +134,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <span
             className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
               activeTab === 'created_by_me'
-                ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400'
-                : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300'
+                ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 font-black'
+                : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 font-bold'
             }`}
           >
             {activeCreatedEvents.length}
@@ -152,9 +145,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('my_invites')}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-extrabold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'my_invites'
-              ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-sm'
+              ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-black'
               : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
           }`}
         >
@@ -162,10 +155,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <span
             className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
               pendingInvites.length > 0
-                ? 'bg-red-600 text-white'
+                ? 'bg-red-600 text-white font-black'
                 : activeTab === 'my_invites'
-                ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400'
-                : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300'
+                ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 font-black'
+                : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 font-bold'
             }`}
           >
             {activeInvites.length}

@@ -1560,25 +1560,25 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       )}
 
       {/* BARRA INSERIMENTO MESSAGGIO & REGISTRAZIONE VOCALE */}
-      <div className="p-2 sm:p-3 bg-white dark:bg-neutral-900 border-t border-neutral-200/80 dark:border-neutral-800 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] sm:pb-3 shrink-0">
+      <div className="w-full max-w-full px-2.5 py-2 sm:px-3.5 sm:py-3 bg-white dark:bg-neutral-900 border-t border-neutral-200/80 dark:border-neutral-800 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 shrink-0 box-border overflow-hidden">
         {isRecording ? (
           /* Interfaccia Registratore Vocale in Corso */
-          <div className="flex items-center justify-between gap-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 px-4 py-2.5 rounded-2xl animate-pulse">
-            <div className="flex items-center gap-2.5">
-              <div className="w-3 h-3 rounded-full bg-red-600 animate-ping" />
-              <span className="text-xs font-mono font-bold text-red-600 dark:text-red-400">
+          <div className="w-full max-w-full flex items-center justify-between gap-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 px-3.5 py-2 min-h-[44px] rounded-2xl animate-pulse box-border">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping shrink-0" />
+              <span className="text-xs font-mono font-bold text-red-600 dark:text-red-400 shrink-0">
                 {formatSeconds(recordingSeconds)}
               </span>
-              <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Registrazione vocale in corso...
+              <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300 truncate">
+                Registrazione vocale...
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={cancelRecording}
-                className="p-2 rounded-xl bg-white dark:bg-neutral-800 text-neutral-600 hover:text-red-600 shadow-2xs cursor-pointer"
+                className="w-9 h-9 rounded-xl bg-white dark:bg-neutral-800 text-neutral-600 hover:text-red-600 shadow-2xs flex items-center justify-center cursor-pointer transition-colors"
                 title="Annulla registrazione"
               >
                 <Trash2 className="w-4 h-4" />
@@ -1586,45 +1586,45 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               <button
                 type="button"
                 onClick={stopAndSendRecording}
-                className="px-3 py-1.5 rounded-xl bg-[#00a884] hover:bg-[#008f6f] text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-[#00a884] hover:bg-[#008f6f] text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95 transition-all"
                 title="Invia nota vocale"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>Invia Audio</span>
+                <span>Invia</span>
               </button>
             </div>
           </div>
         ) : (
-          /* Normale Barra di Input con Tasti Allegati e Microfono */
-          <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-2">
+          /* Normale Barra di Input con Tasti Allegati e Microfono (Ottimizzata per mobile con min-w-0 e zero overflow) */
+          <form onSubmit={handleSendMessage} className="w-full max-w-full flex items-center gap-1.5 sm:gap-2 box-border">
             
             {/* Tasto Invia Immagine */}
             <button
               type="button"
               onClick={() => imageInputRef.current?.click()}
-              className="p-2 sm:p-2.5 rounded-2xl text-neutral-500 hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0"
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-neutral-500 hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0"
               title="Invia Foto / Immagine"
             >
-              <ImageIcon className="w-5 h-5" />
+              <ImageIcon className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
             </button>
 
             {/* Tasto Invia File / Documento */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-2 sm:p-2.5 rounded-2xl text-neutral-500 hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0"
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-neutral-500 hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0"
               title="Invia Documento o File"
             >
-              <Paperclip className="w-5 h-5" />
+              <Paperclip className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
             </button>
 
-            {/* Campo Testo */}
+            {/* Campo Testo (con min-w-0 per evitare overflow flexbox su mobile) */}
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               placeholder={`Scrivi un messaggio in ${contextName}...`}
-              className="flex-1 px-4 py-2.5 bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-2xl text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#f23e2e] transition-all"
+              className="flex-1 min-w-0 min-h-[44px] sm:min-h-[44px] px-3.5 py-2.5 sm:px-4 bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-2xl text-xs sm:text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#f23e2e] transition-all"
             />
 
             {/* Se c'è testo o allegato pronto: Tasto INVIA. Altrimenti: Tasto MICROFONO */}
@@ -1632,19 +1632,19 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               <button
                 type="submit"
                 disabled={isSending}
-                className="p-2.5 sm:p-3 rounded-2xl bg-[#00a884] hover:bg-[#008f6f] disabled:opacity-40 text-white shadow-md shadow-emerald-600/25 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#00a884] hover:bg-[#008f6f] disabled:opacity-40 text-white shadow-md shadow-emerald-600/30 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
                 aria-label="Invia messaggio"
               >
-                <Send className="w-4 h-4 stroke-[2.2px]" />
+                <Send className="w-4.5 h-4.5 sm:w-5 sm:h-5 stroke-[2.2px]" />
               </button>
             ) : (
               <button
                 type="button"
                 onClick={startRecording}
-                className="p-2.5 sm:p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-800 hover:bg-[#00a884] hover:text-white text-neutral-600 dark:text-neutral-300 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-neutral-100 dark:bg-neutral-800 hover:bg-[#00a884] hover:text-white text-neutral-600 dark:text-neutral-300 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0 shadow-2xs"
                 title="Tieni premuto o clicca per registrare una nota vocale"
               >
-                <Mic className="w-4 h-4 stroke-[2.2px]" />
+                <Mic className="w-4.5 h-4.5 sm:w-5 sm:h-5 stroke-[2.2px]" />
               </button>
             )}
           </form>

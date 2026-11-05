@@ -1233,7 +1233,31 @@ export default function App() {
     }
   };
 
-  // GESTIONE E MODIFICA DEI GRUPPI (Creatore o Admin)
+  // GESTIONE E MODIFICA COMPLETA DEI GRUPPI (Creatore o Admin)
+  const handleUpdateGroup = async (
+    groupId: string,
+    data: { name: string; description?: string; avatar?: string; isPublic?: boolean }
+  ) => {
+    if (!currentUser) return;
+    const cleanName = data.name.trim();
+    if (!cleanName) return;
+
+    // Aggiornamento locale immediato
+    setGroups((prev) =>
+      prev.map((g) => (g.id === groupId ? { ...g, ...data, name: cleanName } : g))
+    );
+
+    try {
+      await fetch(`/api/groups/${groupId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, name: cleanName, userId: currentUser.id }),
+      });
+    } catch (e) {
+      console.warn('[API update group error]', e);
+    }
+  };
+
   const handleUpdateGroupName = async (groupId: string, newName: string) => {
     if (!currentUser) return;
     const cleanName = newName.trim();
@@ -2254,6 +2278,7 @@ export default function App() {
                     }}
                     onSelectSubgroup={(subgroupId) => setActiveSubgroupId(subgroupId)}
                     onOpenMembersModal={() => setIsGroupMembersModalOpen(true)}
+                    onUpdateGroup={handleUpdateGroup}
                     onUpdateGroupName={handleUpdateGroupName}
                     onDeleteGroup={handleDeleteGroup}
                     onUpdateSubgroup={handleUpdateSubgroup}
