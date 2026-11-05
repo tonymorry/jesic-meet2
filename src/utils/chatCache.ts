@@ -9,6 +9,24 @@
 
 import { ChatMessage } from '../types';
 
+/** Durata di vita massima di ciascun messaggio di chat: 50 giorni esatti */
+export const CHAT_MESSAGE_TTL_DAYS = 50;
+export const CHAT_MESSAGE_TTL_MS = 50 * 24 * 60 * 60 * 1000;
+
+/**
+ * Controlla se un messaggio ha superato la durata massima di 50 giorni
+ */
+export function isChatMessageExpired(isoStringOrDate?: string | Date): boolean {
+  if (!isoStringOrDate) return false;
+  try {
+    const time = new Date(isoStringOrDate).getTime();
+    if (isNaN(time)) return false;
+    return Date.now() - time > CHAT_MESSAGE_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
 export interface ChatCacheEntry {
   messages: ChatMessage[];
   hasMore: boolean;
@@ -28,14 +46,21 @@ export function getChatCacheKey(groupId: string, subgroupId?: string | null): st
 }
 
 /**
- * Recupera i messaggi dalla cache (memoria prima, poi localStorage)
+ * Recupera i messaggi dalla cache (memoria prima, poi localStorage),
+ * filtrando rigorosamente ed eliminando qualsiasi messaggio scaduto (>50 giorni).
  */
 export function getCachedChat(groupId: string, subgroupId?: string | null): ChatCacheEntry | null {
   const key = getChatCacheKey(groupId, subgroupId);
 
   // 1. Memoria (istantaneo, 0 millisecondi)
   if (memoryCache.has(key)) {
-    return memoryCache.get(key)!;
+    const entry = memoryCache.get(key)!;
+    const validMessages = entry.messages.filter((m) => !isChatMessageExpired(m.createdAt));
+    if (validMessages.length !== entry.messages.length) {
+      entry.messages = validMessages;
+      memoryCache.set(key, entry);
+    }
+    return entry;
   }
 
   // 2. localStorage
@@ -45,13 +70,30 @@ export function getCachedChat(groupId: string, subgroupId?: string | null): Chat
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.messages)) {
+          // Rimuove messaggi più vecchi di 50 giorni
+          const validMessages = parsed.messages.filter((m: any) => !isChatMessageExpired(m.createdAt));
           const entry: ChatCacheEntry = {
-            messages: parsed.messages,
+            messages: validMessages,
             hasMore: Boolean(parsed.hasMore),
             nextCursor: parsed.nextCursor || null,
             lastUpdated: parsed.lastUpdated || Date.now(),
           };
           memoryCache.set(key, entry);
+
+          // Se sono stati eliminati messaggi scaduti, aggiorna anche localStorage
+          if (validMessages.length !== parsed.messages.length) {
+            try {
+              localStorage.setItem(key, JSON.stringify({
+                messages: validMessages.slice(-100),
+                hasMore: entry.hasMore,
+                nextCursor: entry.nextCursor,
+                lastUpdated: entry.lastUpdated,
+              }));
+            } catch {
+              // Ignore localStorage set error
+            }
+          }
+
           return entry;
         }
       }
@@ -64,7 +106,7 @@ export function getCachedChat(groupId: string, subgroupId?: string | null): Chat
 }
 
 /**
- * Salva i messaggi in cache (memoria e localStorage)
+ * Salva i messaggi in cache (memoria e localStorage), escludendo i messaggi scaduti (>50 giorni)
  */
 export function setCachedChat(
   groupId: string,
@@ -72,8 +114,11 @@ export function setCachedChat(
   data: { messages: ChatMessage[]; hasMore?: boolean; nextCursor?: string | null }
 ): void {
   const key = getChatCacheKey(groupId, subgroupId);
+  // Escludi rigorosamente i messaggi più vecchi di 50 giorni
+  const validMessages = (data.messages || []).filter((m) => !isChatMessageExpired(m.createdAt));
+
   const entry: ChatCacheEntry = {
-    messages: data.messages,
+    messages: validMessages,
     hasMore: Boolean(data.hasMore),
     nextCursor: data.nextCursor || null,
     lastUpdated: Date.now(),

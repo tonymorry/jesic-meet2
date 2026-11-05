@@ -184,23 +184,33 @@ export async function sendChatPushNotification(params: {
     });
     if (!group) return;
 
-    // Recupera i membri del gruppo, escludendo l'autore del messaggio
-    const memberIds = (group.members || [])
-      .map((m: any) => m.userId)
-      .filter((uid: string) => uid && uid !== params.authorId);
-
-    if (memberIds.length === 0) return;
-
-    // Se è un sottogruppo, recupera il nome del sottogruppo
+    // Recupera i membri destinatari della notifica (escludendo l'autore)
+    let memberIds: string[] = [];
     let contextTitle = group.name;
+
     if (params.subgroupId) {
       const sub = (group.subgroups || []).find(
         (s: any) => s.id === params.subgroupId || s._id === params.subgroupId
       );
       if (sub) {
         contextTitle = `${group.name} • ${sub.name}`;
+        // Per il sottogruppo, notifica SOLO chi appartiene a quello specifico sottogruppo
+        const subMembers = Array.from(
+          new Set([sub.createdBy, ...(sub.members || [])].filter(Boolean))
+        );
+        memberIds = subMembers.filter((uid: string) => uid && uid !== params.authorId);
+      } else {
+        memberIds = (group.members || [])
+          .map((m: any) => m.userId)
+          .filter((uid: string) => uid && uid !== params.authorId);
       }
+    } else {
+      memberIds = (group.members || [])
+        .map((m: any) => m.userId)
+        .filter((uid: string) => uid && uid !== params.authorId);
     }
+
+    if (memberIds.length === 0) return;
 
     const senderFullName = [params.authorName, params.authorSurname].filter(Boolean).join(' ');
     const title = `${contextTitle} - ${senderFullName}`;

@@ -918,6 +918,10 @@ ChatMessageSchema.virtual('id').get(function (this: any) {
 // Indice composto per query chat istantanee ad alte prestazioni anche con 500+ messaggi
 ChatMessageSchema.index({ groupId: 1, subgroupId: 1, createdAt: -1 });
 
+// Indice TTL MongoDB: eliminazione automatica di ogni singolo messaggio 50 giorni dopo il suo invio
+// 50 giorni = 50 * 24 * 60 * 60 = 4.320.000 secondi
+ChatMessageSchema.index({ createdAt: 1 }, { expireAfterSeconds: 50 * 24 * 60 * 60 });
+
 export const ChatMessageModel: Model<IChatMessage> =
   mongoose.models.ChatMessage || mongoose.model<IChatMessage>('ChatMessage', ChatMessageSchema);
 export const ChatMessage: Model<IChatMessage> = ChatMessageModel;

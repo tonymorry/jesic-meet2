@@ -122,7 +122,49 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(data.title || 'JESic Meet', notificationOptions)
+    (async () => {
+      try {
+        // Verifica se l'utente ha finestre o schede dell'app/sito attualmente aperte
+        const windowClients = await self.clients.matchAll({
+          type: 'window',
+          includeUncontrolled: true,
+        });
+
+        // L'utente sta già usando l'app o il sito se almeno una finestra è visibile e/o focalizzata
+        const isUserActiveInApp = windowClients.some(
+          (client) => client.focused || client.visibilityState === 'visible'
+        );
+
+        // Se l'utente ha la pagina aperta sullo schermo e sta già usando l'app,
+        // NON mostrare alcuna notifica di sistema (arriverà solo a schermo spento, app chiusa o in background)
+        if (isUserActiveInApp) {
+          // Opzionale: invia un messaggio interno silenzioso per aggiornare la UI in tempo reale
+          windowClients.forEach((client) => {
+            try {
+              client.postMessage({
+                type: 'PUSH_SUPPRESSED_ACTIVE_APP',
+                data,
+              });
+            } catch (postErr) {
+              // Ignore postMessage error
+            }
+          });
+          return;
+        }
+
+        // Se l'app/sito sono chiusi, ridotti in background o con telefono bloccato, mostra la notifica
+        await self.registration.showNotification(
+          data.title || 'JESic Meet',
+          notificationOptions
+        );
+      } catch (err) {
+        // Fallback in caso di errori di matchAll
+        await self.registration.showNotification(
+          data.title || 'JESic Meet',
+          notificationOptions
+        );
+      }
+    })()
   );
 });
 

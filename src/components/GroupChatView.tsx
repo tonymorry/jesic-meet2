@@ -45,6 +45,7 @@ import {
   removeMessageFromCache,
   getMessageDateKey,
   getMessageDateLabel,
+  isChatMessageExpired,
 } from '../utils/chatCache';
 
 export interface GroupChatViewProps {
@@ -67,11 +68,20 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 
   // Inizializzazione sincrona istantanea da Cache in memoria o localStorage (0 millisecondi)
   const initialCached = getCachedChat(activeGroup.id, subgroupId);
-  const [messages, setMessages] = useState<ChatMessage[]>(() => initialCached?.messages || []);
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    (initialCached?.messages || []).filter((m) => !isChatMessageExpired(m.createdAt))
+  );
   const [hasMore, setHasMore] = useState<boolean>(() => Boolean(initialCached?.hasMore));
   const [nextCursor, setNextCursor] = useState<string | null>(() => initialCached?.nextCursor || null);
-  const [isLoading, setIsLoading] = useState<boolean>(() => !initialCached || initialCached.messages.length === 0);
+  const [isLoading, setIsLoading] = useState<boolean>(
+    () => !initialCached || (initialCached.messages || []).filter((m) => !isChatMessageExpired(m.createdAt)).length === 0
+  );
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+
+  // Messaggi attivi non scaduti (garantisce che ogni messaggio sparisca esattamente dopo 50 giorni di vita)
+  const activeMessages = React.useMemo(() => {
+    return messages.filter((m) => !isChatMessageExpired(m.createdAt));
+  }, [messages]);
 
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -269,10 +279,11 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
   // Cambio di gruppo o sottogruppo: legge subito dalla cache in 0ms senza schermate lente
   useEffect(() => {
     const cached = getCachedChat(activeGroup.id, subgroupId);
-    if (cached && cached.messages.length > 0) {
-      setMessages(cached.messages);
-      setHasMore(cached.hasMore);
-      setNextCursor(cached.nextCursor || null);
+    const validCached = (cached?.messages || []).filter((m) => !isChatMessageExpired(m.createdAt));
+    if (validCached.length > 0) {
+      setMessages(validCached);
+      setHasMore(cached?.hasMore || false);
+      setNextCursor(cached?.nextCursor || null);
       setIsLoading(false);
     } else {
       setMessages([]);
@@ -1030,7 +1041,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               Caricamento messaggi da MongoDB...
             </p>
           </div>
-        ) : messages.length === 0 ? (
+        ) : activeMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-4 space-y-2">
             <div className="w-12 h-12 rounded-2xl bg-white dark:bg-neutral-800 flex items-center justify-center text-neutral-400 shadow-sm">
               <MessageSquare className="w-6 h-6 stroke-[1.8px]" />
@@ -1039,13 +1050,13 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               Nessun messaggio ancora in questa chat
             </p>
             <p className="text-[11px] text-neutral-500 dark:text-neutral-400 max-w-xs bg-white/70 dark:bg-neutral-900/70 p-2 rounded-xl">
-              Invia messaggi di testo, foto, note vocali o documenti. I messaggi sono salvati in modo permanente su MongoDB per tutti i membri di{' '}
+              Invia messaggi di testo, foto, note vocali o documenti. I messaggi si eliminano automaticamente dopo 50 giorni di vita per mantenere la chat veloce e pulita per i membri di{' '}
               <strong>{contextName}</strong>.
             </p>
           </div>
         ) : (
-          messages.map((msg, idx) => {
-            const prevMsg = idx > 0 ? messages[idx - 1] : null;
+          activeMessages.map((msg, idx) => {
+            const prevMsg = idx > 0 ? activeMessages[idx - 1] : null;
             const currentDateKey = getMessageDateKey(msg.createdAt);
             const prevDateKey = prevMsg ? getMessageDateKey(prevMsg.createdAt) : null;
             const showDateSeparator = idx === 0 || currentDateKey !== prevDateKey;

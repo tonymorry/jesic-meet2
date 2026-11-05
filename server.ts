@@ -134,10 +134,30 @@ app.use((req, res, next) => {
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/jesic_meet';
 mongoose.set('bufferTimeoutMS', 3000);
 
+/**
+ * Eliminazione automatica e definitiva di ogni messaggio più vecchio di 50 giorni da MongoDB.
+ * Ogni singolo messaggio scade e viene eliminato 50 giorni dopo la sua data di invio (createdAt).
+ */
+async function purgeExpiredChatMessages() {
+  try {
+    const fiftyDaysAgo = new Date(Date.now() - 50 * 24 * 60 * 60 * 1000);
+    const res = await ChatMessageModel.deleteMany({ createdAt: { $lt: fiftyDaysAgo } });
+    if (res && res.deletedCount && res.deletedCount > 0) {
+      console.log(`[ChatMessage TTL] Eliminati definitivamente ${res.deletedCount} messaggi più vecchi di 50 giorni da MongoDB.`);
+    }
+  } catch (err: any) {
+    console.warn('[ChatMessage TTL] Errore durante la rimozione dei messaggi scaduti:', err?.message || err);
+  }
+}
+
 async function connectToDatabase() {
   try {
     await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
     console.log('🍃 Connessione a MongoDB Atlas attiva con successo!');
+    // Esegui la pulizia automatica dei messaggi scaduti (>50 giorni) all'avvio
+    purgeExpiredChatMessages();
+    // Programma la verifica ogni 30 minuti
+    setInterval(purgeExpiredChatMessages, 30 * 60 * 1000);
   } catch (err: any) {
     console.error('❌ Errore connessione a MongoDB:', err.message);
   }
@@ -1670,9 +1690,13 @@ app.get('/api/groups/:id/chat', async (req: Request, res: Response) => {
 
     const ESSENTIAL_FIELDS = '_id id groupId subgroupId authorId authorName authorSurname authorAvatar content attachment replyTo isEdited editedAt createdAt';
 
+    // Limite di vita per ciascun messaggio: esattamente 50 giorni dalla creazione (singola scadenza rolling)
+    const fiftyDaysAgo = new Date(Date.now() - 50 * 24 * 60 * 60 * 1000);
+
     // 1. Sincronizzazione Delta ultra-rapida: scarica SOLO i nuovi messaggi successivi a un timestamp
     if (afterDate && !isNaN(afterDate.getTime())) {
-      filter.createdAt = { $gt: afterDate };
+      const minDate = afterDate.getTime() > fiftyDaysAgo.getTime() ? afterDate : fiftyDaysAgo;
+      filter.createdAt = { $gt: minDate };
 
       const deltaMessages = await ChatMessageModel.find(filter)
         .select(ESSENTIAL_FIELDS)
@@ -1703,7 +1727,9 @@ app.get('/api/groups/:id/chat', async (req: Request, res: Response) => {
     }
 
     if (beforeDate && !isNaN(beforeDate.getTime())) {
-      filter.createdAt = { $lt: beforeDate };
+      filter.createdAt = { $lt: beforeDate, $gt: fiftyDaysAgo };
+    } else {
+      filter.createdAt = { $gt: fiftyDaysAgo };
     }
 
     // Carica gli ultimi `limitNum` messaggi ordinati per createdAt decrescente (-1)
