@@ -117,8 +117,18 @@ export function setCachedChat(
   // Escludi rigorosamente i messaggi più vecchi di 50 giorni
   const validMessages = (data.messages || []).filter((m) => !isChatMessageExpired(m.createdAt));
 
+  // Deduplicazione per ID univoco (impedisce qualsiasi messaggio doppio nella cache)
+  const seenIds = new Set<string>();
+  const deduped: ChatMessage[] = [];
+  for (const m of validMessages) {
+    if (m && m.id && !seenIds.has(m.id)) {
+      seenIds.add(m.id);
+      deduped.push(m);
+    }
+  }
+
   const entry: ChatCacheEntry = {
-    messages: validMessages,
+    messages: deduped,
     hasMore: Boolean(data.hasMore),
     nextCursor: data.nextCursor || null,
     lastUpdated: Date.now(),
@@ -164,17 +174,40 @@ export function updateMessageInCache(
       updatedMessages = [...currentMessages.filter((m) => m.id !== message.id), message];
     }
   } else {
-    const existingIdx = currentMessages.findIndex((m) => m.id === message.id);
-    if (existingIdx >= 0) {
-      currentMessages[existingIdx] = { ...currentMessages[existingIdx], ...message };
+    // Cerca se esiste una bolla provvisoria corrispondente (per clientMessageId o contenuto/autore)
+    const optIdx = currentMessages.findIndex(
+      (m) =>
+        (message.clientMessageId && m.id === message.clientMessageId) ||
+        (m.id.startsWith('msg-opt-') &&
+          m.authorId === message.authorId &&
+          m.content === message.content &&
+          Math.abs(new Date(m.createdAt).getTime() - new Date(message.createdAt).getTime()) < 15000)
+    );
+
+    if (optIdx >= 0) {
+      currentMessages[optIdx] = message;
       updatedMessages = currentMessages;
     } else {
-      updatedMessages = [...currentMessages, message];
+      const existingIdx = currentMessages.findIndex((m) => m.id === message.id);
+      if (existingIdx >= 0) {
+        currentMessages[existingIdx] = { ...currentMessages[existingIdx], ...message };
+        updatedMessages = currentMessages;
+      } else {
+        updatedMessages = [...currentMessages, message];
+      }
     }
   }
 
+  // Deduplica rigorosamente prima di salvare
+  const seen = new Set<string>();
+  const cleanList = updatedMessages.filter((m) => {
+    if (!m || !m.id || seen.has(m.id)) return false;
+    seen.add(m.id);
+    return true;
+  });
+
   setCachedChat(groupId, subgroupId, {
-    messages: updatedMessages,
+    messages: cleanList,
     hasMore: cached?.hasMore,
     nextCursor: cached?.nextCursor,
   });

@@ -140,9 +140,44 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
   );
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
 
-  // Messaggi attivi non scaduti (garantisce che ogni messaggio sparisca esattamente dopo 50 giorni di vita)
+  // Messaggi attivi deduplicati e non scaduti (garantisce zero duplicati visivi e scadenza a 50 giorni)
   const activeMessages = React.useMemo(() => {
-    return messages.filter((m) => !isChatMessageExpired(m.createdAt));
+    const valid = messages.filter((m) => !isChatMessageExpired(m.createdAt));
+    const seenIds = new Set<string>();
+    const seenClientMsgIds = new Set<string>();
+    const deduplicated: ChatMessage[] = [];
+
+    for (const m of valid) {
+      if (!m || !m.id) continue;
+
+      // Se è un messaggio provvisorio (msg-opt-), verifica se nella lista c'è già il messaggio reale corrispondente
+      if (m.id.startsWith('msg-opt-')) {
+        const hasRealCounterpart = valid.some(
+          (other) =>
+            other.id !== m.id &&
+            !other.id.startsWith('msg-opt-') &&
+            ((other.clientMessageId && other.clientMessageId === m.id) ||
+              (other.authorId === m.authorId &&
+                other.content === m.content &&
+                Math.abs(new Date(other.createdAt).getTime() - new Date(m.createdAt).getTime()) < 20000))
+        );
+        if (hasRealCounterpart) {
+          continue; // Salta la bolla provvisoria: il messaggio reale del server è già visualizzato
+        }
+      }
+
+      if (seenIds.has(m.id)) continue;
+      seenIds.add(m.id);
+
+      if (m.clientMessageId) {
+        if (seenClientMsgIds.has(m.clientMessageId)) continue;
+        seenClientMsgIds.add(m.clientMessageId);
+      }
+
+      deduplicated.push(m);
+    }
+
+    return deduplicated;
   }, [messages]);
 
   const [inputText, setInputText] = useState('');
@@ -165,6 +200,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const isLongPressActiveRef = useRef(false);
   const pendingMarkReadIdsRef = useRef<Set<string>>(new Set());
+  const lastSendTimeRef = useRef<number>(0);
 
   // Elenco partecipanti effettivi della conversazione (Gruppo Generale o Sottogruppo)
   const targetMemberIds = useMemo<string[]>(() => {
@@ -306,16 +342,35 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
           if (data.isDelta) {
             if (data.messages.length > 0) {
               setMessages((prev) => {
-                const existingIds = new Set(prev.map((m) => m.id));
+                // Sostituisci eventuali messaggi provvisori con i messaggi reali corrispondenti
+                const replaced = prev.map((m) => {
+                  if (!m.id.startsWith('msg-opt-')) return m;
+                  const match = data.messages.find(
+                    (sm: any) =>
+                      (sm.clientMessageId && sm.clientMessageId === m.id) ||
+                      (sm.authorId === m.authorId && sm.content === m.content)
+                  );
+                  return match || m;
+                });
+
+                const existingIds = new Set(replaced.map((m) => m.id));
                 const newOnly = data.messages.filter((m: any) => !existingIds.has(m.id));
-                if (newOnly.length === 0) return prev;
-                const nextList = [...prev, ...newOnly];
+                const merged = [...replaced, ...newOnly];
+
+                // Deduplica rigorosamente per ID univoco
+                const seen = new Set<string>();
+                const deduped = merged.filter((m) => {
+                  if (!m || !m.id || seen.has(m.id)) return false;
+                  seen.add(m.id);
+                  return true;
+                });
+
                 setCachedChat(activeGroup.id, subgroupId, {
-                  messages: nextList,
+                  messages: deduped,
                   hasMore: cached?.hasMore,
                   nextCursor: cached?.nextCursor,
                 });
-                return nextList;
+                return deduped;
               });
             }
           } else {
@@ -323,15 +378,30 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               // Preserva i messaggi ottimistici in corso di invio non ancora confermati dal server
               const pendingOptimistic = prev.filter((m) => m.id.startsWith('msg-opt-'));
               const unconfirmed = pendingOptimistic.filter(
-                (opt) => !data.messages.some((sm: any) => sm.authorId === opt.authorId && sm.content === opt.content)
+                (opt) =>
+                  !data.messages.some(
+                    (sm: any) =>
+                      sm.id === opt.id ||
+                      (sm.clientMessageId && sm.clientMessageId === opt.id) ||
+                      (sm.authorId === opt.authorId && sm.content === opt.content)
+                  )
               );
-              const nextList = [...data.messages, ...unconfirmed];
+              const all = [...data.messages, ...unconfirmed];
+
+              // Deduplica per ID
+              const seen = new Set<string>();
+              const deduped = all.filter((m) => {
+                if (!m || !m.id || seen.has(m.id)) return false;
+                seen.add(m.id);
+                return true;
+              });
+
               setCachedChat(activeGroup.id, subgroupId, {
-                messages: nextList,
+                messages: deduped,
                 hasMore: Boolean(data.hasMore),
                 nextCursor: data.nextCursor,
               });
-              return nextList;
+              return deduped;
             });
             setHasMore(Boolean(data.hasMore));
             setNextCursor(data.nextCursor || null);
@@ -433,12 +503,20 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 
     if (payload.message) {
       setMessages((prev) => {
-        const alreadyInList = prev.some((m) => m.id === payload.message.id);
-        if (alreadyInList) return prev;
+        // Se il messaggio con ID reale è già presente, ignora (nessuna duplicazione)
+        if (prev.some((m) => m.id === payload.message.id)) {
+          return prev;
+        }
 
+        // Cerca se esiste una bolla provvisoria corrispondente a questo messaggio inviato
         const optIdx = prev.findIndex(
-          (m) => m.id.startsWith('msg-opt-') && m.authorId === payload.message.authorId && m.content === payload.message.content
+          (m) =>
+            (payload.message.clientMessageId && m.id === payload.message.clientMessageId) ||
+            (m.id.startsWith('msg-opt-') &&
+              m.authorId === payload.message.authorId &&
+              m.content === payload.message.content)
         );
+
         let next: ChatMessage[];
         if (optIdx >= 0) {
           next = [...prev];
@@ -447,8 +525,16 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
           next = [...prev, payload.message];
         }
 
-        updateMessageInCache(activeGroup.id, currentSub, payload.message);
-        return next;
+        // Deduplica rigorosamente per ID univoco
+        const seen = new Set<string>();
+        const deduped = next.filter((m) => {
+          if (!m || !m.id || seen.has(m.id)) return false;
+          seen.add(m.id);
+          return true;
+        });
+
+        updateMessageInCache(activeGroup.id, currentSub, payload.message, payload.message.clientMessageId || undefined);
+        return deduped;
       });
     }
   });
@@ -782,11 +868,18 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
     sendMessagePayload('', attachment);
   };
 
-  // Invio Messaggio Principale - ISTANTANEO (Optimistic UI stile WhatsApp/Telegram)
+  // Invio Messaggio Principale - ISTANTANEO (Optimistic UI con protezione anti-duplicato)
   const handleSendMessage = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const cleanText = inputText.trim();
     if (!cleanText && !pendingAttachment) return;
+
+    // Protezione doppio click/tap rapido accidentale su mobile
+    const now = Date.now();
+    if (now - lastSendTimeRef.current < 250) {
+      return;
+    }
+    lastSendTimeRef.current = now;
 
     const attachmentToSend = pendingAttachment;
     setPendingAttachment(null);
@@ -813,7 +906,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 
     setReplyingTo(null);
 
-    // ID temporaneo per visualizzazione ottimistica istantanea (0 millisecondi)
+    // ID temporaneo univoco per visualizzazione ottimistica istantanea (0 millisecondi)
     const tempId = `msg-opt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const optimisticMsg: ChatMessage = {
       id: tempId,
@@ -822,10 +915,11 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       authorId: currentUser.id,
       authorName: currentUser.name,
       authorSurname: currentUser.surname,
-      authorAvatar: null, // NON memorizziamo né inviamo l'avatar duplicato
+      authorAvatar: null,
       content,
       attachment,
       replyTo: replyPayload,
+      clientMessageId: tempId,
       createdAt: new Date().toISOString(),
     };
 
@@ -838,17 +932,18 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     });
 
-    // 3. Salvataggio in background su MongoDB (nessun blocco dell'interfaccia utente)
+    // 3. Salvataggio in background su MongoDB con clientMessageId per riconciliazione univoca
     try {
       const res = await fetch(`/api/groups/${activeGroup.id}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          clientMessageId: tempId,
           subgroupId,
           authorId: currentUser.id,
           authorName: currentUser.name,
           authorSurname: currentUser.surname,
-          authorAvatar: null, // Regola salva-spazio: niente avatar duplicati nel database
+          authorAvatar: null,
           content,
           attachment,
           replyTo: replyPayload,
@@ -858,8 +953,26 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data && data.message) {
-          // Aggiorna la bolla provvisoria con l'ID e timestamp reali confermati da MongoDB
-          setMessages((prev) => prev.map((m) => (m.id === tempId ? data.message : m)));
+          setMessages((prev) => {
+            // Se il messaggio è già stato inserito con l'ID reale (es. ricevuto via WebSocket in anticipo)
+            const alreadyHasReal = prev.some((m) => m.id === data.message.id);
+            let next: ChatMessage[];
+            if (alreadyHasReal) {
+              // Rimuovi semplicemente la bolla provvisoria tempId per non sdoppiare
+              next = prev.filter((m) => m.id !== tempId);
+            } else {
+              // Sostituisci la bolla provvisoria con quella ufficiale convalidata
+              next = prev.map((m) => (m.id === tempId ? data.message : m));
+            }
+
+            // Deduplicazione di sicurezza per ID univoco
+            const seen = new Set<string>();
+            return next.filter((m) => {
+              if (!m || !m.id || seen.has(m.id)) return false;
+              seen.add(m.id);
+              return true;
+            });
+          });
           updateMessageInCache(activeGroup.id, subgroupId, data.message, tempId);
         }
       }

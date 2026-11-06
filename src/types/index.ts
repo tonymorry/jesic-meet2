@@ -184,6 +184,7 @@ export interface ChatMessage {
   isEdited?: boolean;
   editedAt?: string;
   readBy?: ChatReadReceipt[];
+  clientMessageId?: string | null;
   createdAt: string;
 }
 

@@ -1906,7 +1906,7 @@ app.get('/api/groups/:id/chat', async (req: Request, res: Response) => {
 // POST /api/groups/:id/chat - Invia un nuovo messaggio di chat in MongoDB
 app.post('/api/groups/:id/chat', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { subgroupId, authorId, authorName, authorSurname, authorAvatar, content, attachment, replyTo } = req.body;
+  const { subgroupId, authorId, authorName, authorSurname, authorAvatar, content, attachment, replyTo, clientMessageId } = req.body;
 
   if (!authorId || (!content?.trim() && !attachment)) {
     return res.status(400).json({ error: 'Autore e contenuto o allegato obbligatori' });
@@ -1953,6 +1953,7 @@ app.post('/api/groups/:id/chat', async (req: Request, res: Response) => {
 
     const mapped = {
       id: created._id || created.id,
+      clientMessageId: clientMessageId || null,
       groupId: created.groupId,
       subgroupId: created.subgroupId || null,
       authorId: created.authorId,
