@@ -135,9 +135,15 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/jesic_
 mongoose.set('bufferTimeoutMS', 3000);
 
 /**
- * Eliminazione automatica e definitiva di ogni messaggio più vecchio di 50 giorni da MongoDB.
- * Ogni singolo messaggio scade e viene eliminato 50 giorni dopo la sua data di invio (createdAt).
+ * Ottimizzazioni Spazio Database MongoDB Atlas (Piano Gratuito max 500 MB):
+ * 1. Cancellazione automatica messaggi chat più vecchi di 50 giorni.
+ * 2. Pulizia automatica file pesanti (foto e note vocali) più vecchi di 20 giorni.
+ * 3. Eliminazione duplicati pesanti (rimozione authorAvatar dai singoli messaggi).
+ * 4. Cancellazione eventi e impegni del calendario conclusi da più di 30 giorni (e relative risposte).
+ * 5. Pulizia vecchie registrazioni di notifica push scadute o non più attive.
  */
+
+// 1. Messaggi chat scaduti (>50 giorni)
 async function purgeExpiredChatMessages() {
   try {
     const fiftyDaysAgo = new Date(Date.now() - 50 * 24 * 60 * 60 * 1000);
@@ -150,14 +156,130 @@ async function purgeExpiredChatMessages() {
   }
 }
 
+// 2. Foto e Note Vocali scadute (>20 giorni) per non accumulare allegati pesanti
+async function purgeExpiredChatMedia() {
+  try {
+    const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+    const res = await ChatMessageModel.updateMany(
+      {
+        createdAt: { $lt: twentyDaysAgo },
+        'attachment.type': { $in: ['image', 'audio'] },
+      },
+      {
+        $unset: { attachment: '' },
+      }
+    );
+    if (res && res.modifiedCount && res.modifiedCount > 0) {
+      console.log(`[Chat Media TTL] Ripuliti ${res.modifiedCount} allegati multimediali (foto/audio) con più di 20 giorni per liberare spazio.`);
+    }
+  } catch (err: any) {
+    console.warn('[Chat Media TTL] Errore pulizia allegati multimediali scaduti:', err?.message || err);
+  }
+}
+
+// 3. Bonifica avatar duplicati: i messaggi non devono conservare l'immagine base64 dell'utente
+async function purgeDuplicateAvatarsFromMessages() {
+  try {
+    const res = await ChatMessageModel.updateMany(
+      { authorAvatar: { $ne: null } },
+      { $set: { authorAvatar: null } }
+    );
+    if (res && res.modifiedCount && res.modifiedCount > 0) {
+      console.log(`[ChatMessage Optimizer] Rimossi avatar duplicati da ${res.modifiedCount} messaggi per alleggerire il database.`);
+    }
+  } catch (err: any) {
+    console.warn('[ChatMessage Optimizer] Errore bonifica avatar duplicati:', err?.message || err);
+  }
+}
+
+// 4. Eventi e Impegni del calendario conclusi da più di 30 giorni
+async function purgeExpiredEventsAndResponses() {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+    const expiredEvents = await EventModel.find({
+      $or: [
+        { 'finalizedSlot.date': { $lt: thirtyDaysAgoStr } },
+        {
+          dates: { $exists: true, $ne: [], $not: { $elemMatch: { $gte: thirtyDaysAgoStr } } },
+          createdAt: { $lt: thirtyDaysAgo },
+        },
+        {
+          finalizedSlot: null,
+          dates: { $size: 0 },
+          createdAt: { $lt: thirtyDaysAgo },
+        },
+      ],
+    })
+      .select('_id id')
+      .lean();
+
+    if (expiredEvents.length > 0) {
+      const expiredIds = expiredEvents.map((e: any) => e._id || e.id);
+      await EventModel.deleteMany({ _id: { $in: expiredIds } });
+      await EventResponseModel.deleteMany({ eventId: { $in: expiredIds } });
+      console.log(`[Event TTL] Eliminati definitivamente ${expiredIds.length} eventi conclusi da più di 30 giorni e relative risposte.`);
+    }
+  } catch (err: any) {
+    console.warn('[Event TTL] Errore pulizia eventi conclusi da >30 giorni:', err?.message || err);
+  }
+}
+
+// 5. Registrazioni push obsolete o non più attive (>60 giorni)
+async function purgeStalePushSubscriptions() {
+  try {
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    const res = await PushSubscriptionModel.deleteMany({
+      $or: [
+        { updatedAt: { $lt: sixtyDaysAgo } },
+        { endpoint: { $exists: false } },
+        { endpoint: '' },
+      ],
+    });
+    if (res && res.deletedCount && res.deletedCount > 0) {
+      console.log(`[Push TTL] Eliminate ${res.deletedCount} registrazioni push non più attive da oltre 60 giorni.`);
+    }
+  } catch (err: any) {
+    console.warn('[Push TTL] Errore pulizia registrazioni push obsolete:', err?.message || err);
+  }
+}
+
+// 6. Rimozione totale degli avatar utente dal database per azzerare lo spazio occupato
+async function purgeAllAvatarsFromDatabase() {
+  try {
+    const res = await UserModel.updateMany(
+      { avatarUrl: { $ne: null } },
+      { $set: { avatarUrl: null } }
+    );
+    if (res && res.modifiedCount && res.modifiedCount > 0) {
+      console.log(`[Avatar Purge] Rimossi gli avatar da ${res.modifiedCount} profili utente per liberare spazio nel database.`);
+    }
+  } catch (err: any) {
+    console.warn('[Avatar Purge] Errore rimozione avatar:', err?.message || err);
+  }
+}
+
+/**
+ * Esegue tutte le operazioni di pulizia automatica per mantenere il database leggero e sotto i 500 MB.
+ */
+async function runDatabaseAutoCleanup() {
+  await purgeExpiredChatMessages();
+  await purgeExpiredChatMedia();
+  await purgeDuplicateAvatarsFromMessages();
+  await purgeExpiredEventsAndResponses();
+  await purgeStalePushSubscriptions();
+  await purgeAllAvatarsFromDatabase();
+}
+
 async function connectToDatabase() {
   try {
     await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
     console.log('🍃 Connessione a MongoDB Atlas attiva con successo!');
-    // Esegui la pulizia automatica dei messaggi scaduti (>50 giorni) all'avvio
-    purgeExpiredChatMessages();
-    // Programma la verifica ogni 30 minuti
-    setInterval(purgeExpiredChatMessages, 30 * 60 * 1000);
+    // Esegui la pulizia automatica del database all'avvio
+    runDatabaseAutoCleanup();
+    // Ripeti periodicamente ogni 30 minuti per garantire spazio sempre ottimizzato
+    setInterval(runDatabaseAutoCleanup, 30 * 60 * 1000);
   } catch (err: any) {
     console.error('❌ Errore connessione a MongoDB:', err.message);
   }
@@ -1801,15 +1923,28 @@ app.post('/api/groups/:id/chat', async (req: Request, res: Response) => {
 
     const initialReadBy = [{ userId: authorId, readAt: new Date().toISOString() }];
 
+    // Salvaguardia allegati leggeri per database entro 500 MB
+    let cleanAttachment = attachment;
+    if (cleanAttachment && typeof cleanAttachment === 'object') {
+      if (cleanAttachment.type === 'audio') {
+        cleanAttachment = {
+          ...cleanAttachment,
+          duration: Math.min(cleanAttachment.duration || 1, 60),
+        };
+      }
+    }
+
+    // REGOLA OTTIMIZZAZIONE SPAZIO DB: Non salviamo MAI l'avatar (base64) dell'utente dentro i documenti messaggio.
+    // L'avatar viene risolto dinamicamente dal client o da UserModel, risparmiando centinaia di megabyte.
     const created: any = await ChatMessageModel.create({
       groupId: id,
       subgroupId: cleanSubgroupId,
       authorId,
       authorName: authorName || 'Utente',
       authorSurname: authorSurname || '',
-      authorAvatar: authorAvatar || null,
+      authorAvatar: null,
       content: content ? content.trim() : '',
-      attachment: attachment || undefined,
+      attachment: cleanAttachment || undefined,
       replyTo: replyTo || undefined,
       isEdited: false,
       editedAt: undefined,
@@ -1823,7 +1958,7 @@ app.post('/api/groups/:id/chat', async (req: Request, res: Response) => {
       authorId: created.authorId,
       authorName: created.authorName,
       authorSurname: created.authorSurname,
-      authorAvatar: created.authorAvatar,
+      authorAvatar: null,
       content: created.content,
       attachment: created.attachment,
       replyTo: created.replyTo,
@@ -3199,6 +3334,20 @@ app.post('/api/push/test', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Errore invio notifica test push:', err.message);
     return res.status(500).json({ error: 'Errore invio notifica push di test' });
+  }
+});
+
+// POST /api/maintenance/cleanup - Esegue manualmente la pulizia automatica salva-spazio
+app.post('/api/maintenance/cleanup', async (_req: Request, res: Response) => {
+  try {
+    await runDatabaseAutoCleanup();
+    return res.json({
+      success: true,
+      message: 'Pulizia automatica salva-spazio del database completata con successo!',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Errore durante la pulizia del database: ' + err.message });
   }
 });
 

@@ -48,6 +48,7 @@ import {
   getMessageDateLabel,
   isChatMessageExpired,
 } from '../utils/chatCache';
+import { optimizeImageToUltraLight } from '../utils/imageOptimizer';
 
 /**
  * Rileva il miglior formato audio supportato dal browser per la registrazione vocale.
@@ -98,65 +99,13 @@ const base64ToBlob = (base64DataUrl: string): Blob => {
 };
 
 /**
- * Rimpicciolisce, comprime e converte automaticamente in JPEG leggero qualsiasi immagine
- * (inclusi scatti da 48MP o file da 15-25MB scattati da iPhone o fotocamere Android).
+ * Rimpicciolisce e comprime automaticamente qualsiasi immagine entro 40-50 KB
+ * garantendo risparmio massimo sul limite di 500 MB del database senza perdita visiva su mobile.
  */
 const compressAndOptimizeImage = async (file: File): Promise<{ url: string; size: number }> => {
-  return new Promise((resolve, reject) => {
-    if (file.type === 'image/svg+xml') {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve({ url: e.target?.result as string, size: file.size });
-      reader.onerror = () => reject(new Error('Errore lettura file SVG'));
-      reader.readAsDataURL(file);
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Impossibile leggere il file immagine dal dispositivo'));
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('Formato immagine non supportato o corrotto'));
-      img.onload = () => {
-        try {
-          const MAX_DIM = 1600;
-          let width = img.width;
-          let height = img.height;
-
-          if (width > MAX_DIM || height > MAX_DIM) {
-            if (width > height) {
-              height = Math.round((height * MAX_DIM) / width);
-              width = MAX_DIM;
-            } else {
-              width = Math.round((width * MAX_DIM) / height);
-              height = MAX_DIM;
-            }
-          }
-
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve({ url: e.target?.result as string, size: file.size });
-            return;
-          }
-
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(img, 0, 0, width, height);
-
-          // Converti in JPEG standard universale a qualità 0.82
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
-          const approxBytes = Math.round((compressedDataUrl.length * 3) / 4);
-          resolve({ url: compressedDataUrl, size: approxBytes });
-        } catch (err) {
-          console.warn('Fallback compressione automatica:', err);
-          resolve({ url: e.target?.result as string, size: file.size });
-        }
-      };
-      img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+  return await optimizeImageToUltraLight(file, {
+    maxDimension: 900,
+    targetMaxKB: 50,
   });
 };
 
@@ -717,10 +666,15 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
   };
 
   // Registrazione Vocale (MediaRecorder con supporto universale iOS/Apple e Android)
+  // Registrazione vocale ultra-leggera ottimizzata per la voce con limite di 60 secondi
+  const MAX_RECORDING_SECONDS = 60;
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
+          channelCount: 1, // Canale mono: dimezza il peso dei dati audio
+          sampleRate: 24000, // Frequenza di campionamento perfetta per il parlato
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
@@ -729,7 +683,10 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 
       audioChunksRef.current = [];
       const preferredMime = getBestAudioMimeType();
-      const recorderOptions: MediaRecorderOptions = {};
+      // Bitrate vocale ottimizzato leggerissimo (20 kbps: circa 2.5 KB al secondo, 10s = ~25 KB)
+      const recorderOptions: MediaRecorderOptions = {
+        audioBitsPerSecond: 20000,
+      };
       if (preferredMime) {
         recorderOptions.mimeType = preferredMime;
       }
@@ -755,9 +712,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
         const audioBlob = new Blob(audioChunksRef.current, { type: actualMime });
         stream.getTracks().forEach((track) => track.stop());
 
-        const durationSec = Math.max(
-          1,
-          Math.round((Date.now() - recordingStartTimeRef.current) / 1000)
+        const durationSec = Math.min(
+          MAX_RECORDING_SECONDS,
+          Math.max(1, Math.round((Date.now() - recordingStartTimeRef.current) / 1000))
         );
 
         const reader = new FileReader();
@@ -773,7 +730,19 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       setIsRecording(true);
       setRecordingSeconds(0);
       recordingTimerRef.current = setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1);
+        setRecordingSeconds((prev) => {
+          const next = prev + 1;
+          if (next >= MAX_RECORDING_SECONDS) {
+            // Limite massimo di 60s raggiunto: stop e invio automatico immediato
+            if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+              mediaRecorderRef.current.stop();
+            }
+            setIsRecording(false);
+            return MAX_RECORDING_SECONDS;
+          }
+          return next;
+        });
       }, 1000);
     } catch (err) {
       console.warn('Errore accesso microfono:', err);
@@ -800,34 +769,34 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
     }
   };
 
-  // Invio diretto di una nota vocale
+  // Invio diretto di una nota vocale con limite max 60s
   const sendAudioMessage = async (audioDataUrl: string, durationSec: number) => {
+    const safeDuration = Math.min(durationSec || 1, 60);
     const attachment: ChatAttachment = {
       type: 'audio',
       url: audioDataUrl,
-      duration: durationSec || 1,
-      name: `Nota vocale (${durationSec}s)`,
+      duration: safeDuration,
+      name: `Nota vocale (${safeDuration}s)`,
     };
 
-    await sendMessagePayload('', attachment);
+    sendMessagePayload('', attachment);
   };
 
-  // Invio Messaggio Principale (testo, allegati, replyTo)
-  const handleSendMessage = async (e?: React.FormEvent) => {
+  // Invio Messaggio Principale - ISTANTANEO (Optimistic UI stile WhatsApp/Telegram)
+  const handleSendMessage = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const cleanText = inputText.trim();
-    if ((!cleanText && !pendingAttachment) || isSending) return;
+    if (!cleanText && !pendingAttachment) return;
 
     const attachmentToSend = pendingAttachment;
     setPendingAttachment(null);
     setInputText('');
 
-    await sendMessagePayload(cleanText, attachmentToSend || undefined);
+    // Invio asincrono immediato: il testo scompare subito dal campo e il messaggio appare istantaneamente
+    sendMessagePayload(cleanText, attachmentToSend || undefined);
   };
 
   const sendMessagePayload = async (content: string, attachment?: ChatAttachment) => {
-    setIsSending(true);
-
     const hasQuotedContent =
       Boolean(replyingTo?.content?.trim()) ||
       Boolean(replyingTo?.attachment?.type);
@@ -844,7 +813,8 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 
     setReplyingTo(null);
 
-    const tempId = `msg-opt-${Date.now()}`;
+    // ID temporaneo per visualizzazione ottimistica istantanea (0 millisecondi)
+    const tempId = `msg-opt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const optimisticMsg: ChatMessage = {
       id: tempId,
       groupId: activeGroup.id,
@@ -852,21 +822,23 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       authorId: currentUser.id,
       authorName: currentUser.name,
       authorSurname: currentUser.surname,
-      authorAvatar: currentUser.avatarUrl || null,
+      authorAvatar: null, // NON memorizziamo né inviamo l'avatar duplicato
       content,
       attachment,
       replyTo: replyPayload,
       createdAt: new Date().toISOString(),
     };
 
+    // 1. Inserimento ISTANTANEO nella vista e nella cache locale
     setMessages((prev) => [...prev, optimisticMsg]);
     updateMessageInCache(activeGroup.id, subgroupId, optimisticMsg);
 
-    // Scorri subito in fondo al nuovo messaggio inviato
+    // 2. Scroll istantaneo verso il nuovo messaggio
     requestAnimationFrame(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     });
 
+    // 3. Salvataggio in background su MongoDB (nessun blocco dell'interfaccia utente)
     try {
       const res = await fetch(`/api/groups/${activeGroup.id}/chat`, {
         method: 'POST',
@@ -876,7 +848,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
           authorId: currentUser.id,
           authorName: currentUser.name,
           authorSurname: currentUser.surname,
-          authorAvatar: currentUser.avatarUrl || null,
+          authorAvatar: null, // Regola salva-spazio: niente avatar duplicati nel database
           content,
           attachment,
           replyTo: replyPayload,
@@ -886,14 +858,13 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data && data.message) {
+          // Aggiorna la bolla provvisoria con l'ID e timestamp reali confermati da MongoDB
           setMessages((prev) => prev.map((m) => (m.id === tempId ? data.message : m)));
           updateMessageInCache(activeGroup.id, subgroupId, data.message, tempId);
         }
       }
     } catch (err) {
-      console.error('Errore invio messaggio chat:', err);
-    } finally {
-      setIsSending(false);
+      console.error('Errore sincronizzazione messaggio in background:', err);
     }
   };
 
@@ -1536,19 +1507,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                       : ''
                   }`}
                 >
-                {!isMe && (
-                  <div className="shrink-0 mb-1">
-                    {authorUser ? (
-                      <UserAvatar user={authorUser} size="xs" />
-                    ) : (
-                      <div className="w-6 h-6 rounded-full bg-neutral-300 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200 text-[10px] font-bold flex items-center justify-center">
-                        {msg.authorName.charAt(0)}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div className={`max-w-[85%] sm:max-w-[70%] space-y-0.5 ${isMe ? 'items-end' : 'items-start'}`}>
+                  <div className={`max-w-[85%] sm:max-w-[70%] space-y-0.5 ${isMe ? 'items-end' : 'items-start'}`}>
                   {!isMe && (
                     <span className="text-[10px] font-bold text-[#f23e2e] dark:text-red-400 px-1">
                       {msg.authorName} {msg.authorSurname}
@@ -1912,16 +1871,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
         </div>
       )}
 
-      {/* INDICATORE INVIO IN CORSO (FOTO / AUDIO / TESTO) */}
-      {isSending && (
-        <div className="px-4 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 border-t border-emerald-200 dark:border-emerald-800/60 flex items-center justify-between text-xs font-semibold text-emerald-800 dark:text-emerald-300 animate-in fade-in">
-          <div className="flex items-center gap-2">
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#00a884] shrink-0" />
-            <span>Salvataggio e sincronizzazione in corso...</span>
-          </div>
-          <span className="text-[10px] opacity-75 font-mono">Invio ⚡</span>
-        </div>
-      )}
+
 
       {/* ANTEPRIMA ALLEGATO IN CODA PRIMA DELL'INVIO */}
       {pendingAttachment && (
@@ -1961,15 +1911,15 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       {/* BARRA INSERIMENTO MESSAGGIO & REGISTRAZIONE VOCALE */}
       <div className="w-full max-w-full px-2.5 py-2 sm:px-3.5 sm:py-3 bg-white dark:bg-neutral-900 border-t border-neutral-200/80 dark:border-neutral-800 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 shrink-0 box-border overflow-hidden">
         {isRecording ? (
-          /* Interfaccia Registratore Vocale in Corso */
+          /* Interfaccia Registratore Vocale in Corso con limite 60 secondi */
           <div className="w-full max-w-full flex items-center justify-between gap-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 px-3.5 py-2 min-h-[44px] rounded-2xl animate-pulse box-border">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping shrink-0" />
-              <span className="text-xs font-mono font-bold text-red-600 dark:text-red-400 shrink-0">
-                {formatSeconds(recordingSeconds)}
+              <span className={`text-xs font-mono font-bold shrink-0 ${recordingSeconds >= 50 ? 'text-amber-600 dark:text-amber-400 font-black' : 'text-red-600 dark:text-red-400'}`}>
+                {formatSeconds(recordingSeconds)} / 1:00
               </span>
               <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300 truncate">
-                Registrazione vocale...
+                {recordingSeconds >= 50 ? `Limite 60s (mancano ${60 - recordingSeconds}s)` : 'Registrazione vocale leggera...'}
               </span>
             </div>
 
@@ -1994,7 +1944,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
             </div>
           </div>
         ) : (
-          /* Normale Barra di Input con Tasti Allegati e Microfono (Ottimizzata per mobile con min-w-0 e zero overflow) */
+          /* Normale Barra di Input con Tasti Allegati e Microfono (Ottimizzata per mobile e invio istantaneo senza blocchi) */
           <form onSubmit={handleSendMessage} className="w-full max-w-full flex items-center gap-1.5 sm:gap-2 box-border">
             
             {/* Tasto Invia Immagine */}
@@ -2002,7 +1952,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               type="button"
               onClick={() => imageInputRef.current?.click()}
               className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-neutral-500 hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0"
-              title="Invia Foto / Immagine"
+              title="Invia Foto (Compressione automatica ultra-leggera)"
             >
               <ImageIcon className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
             </button>
@@ -2017,7 +1967,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               <Paperclip className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
             </button>
 
-            {/* Campo Testo (con min-w-0 per evitare overflow flexbox su mobile) */}
+            {/* Campo Testo (con min-w-0 per evitare overflow flexbox su mobile, mai disabilitato per permettere digitazione continua) */}
             <input
               type="text"
               value={inputText}
@@ -2030,9 +1980,8 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
             {inputText.trim() || pendingAttachment ? (
               <button
                 type="submit"
-                disabled={isSending}
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#00a884] hover:bg-[#008f6f] disabled:opacity-40 text-white shadow-md shadow-emerald-600/30 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
-                aria-label="Invia messaggio"
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#00a884] hover:bg-[#008f6f] text-white shadow-md shadow-emerald-600/30 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
+                aria-label="Invia messaggio istantaneamente"
               >
                 <Send className="w-4.5 h-4.5 sm:w-5 sm:h-5 stroke-[2.2px]" />
               </button>
@@ -2041,7 +1990,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                 type="button"
                 onClick={startRecording}
                 className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-neutral-100 dark:bg-neutral-800 hover:bg-[#00a884] hover:text-white text-neutral-600 dark:text-neutral-300 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0 shadow-2xs"
-                title="Tieni premuto o clicca per registrare una nota vocale"
+                title="Registra nota vocale (max 60s, compressione voce ultra-leggera)"
               >
                 <Mic className="w-4.5 h-4.5 sm:w-5 sm:h-5 stroke-[2.2px]" />
               </button>

@@ -23,6 +23,7 @@ import {
   Sparkles,
   RefreshCw,
 } from 'lucide-react';
+import { optimizeImageToUltraLight } from '../utils/imageOptimizer';
 
 interface ImageCropModalProps {
   imageSrc: string;
@@ -172,12 +173,12 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     setFlipH(false);
   };
 
-  // Rendering del ritaglio finale su Canvas ad alta definizione (400x400)
-  const handleApplyCrop = () => {
+  // Rendering del ritaglio finale su Canvas ad alta definizione ultra-leggero (280x280)
+  const handleApplyCrop = async () => {
     if (!imageRef.current) return;
     const img = imageRef.current;
 
-    const outputSize = 400; // Diametro avatar finale ad alta risoluzione
+    const outputSize = 280; // Diametro avatar nitido per display retina
     const canvas = document.createElement('canvas');
     canvas.width = outputSize;
     canvas.height = outputSize;
@@ -201,7 +202,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     }
 
     // Calcolo dimensioni base visualizzate (in proporzione al cerchio di anteprima da 240px)
-    const previewScale = outputSize / CROP_SIZE; // 400 / 240 = 1.6667
+    const previewScale = outputSize / CROP_SIZE;
     
     // Calcola il fattore di scala base per cui l'immagine copre il riquadro 240x240
     const nw = img.naturalWidth || 1;
@@ -224,8 +225,17 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     );
     ctx.restore();
 
-    const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.88);
-    onCropComplete(croppedDataUrl);
+    const rawDataUrl = canvas.toDataURL('image/jpeg', 0.80);
+    try {
+      // Compressione automatica ultra-leggera garantita <= 40 KB
+      const { url } = await optimizeImageToUltraLight(rawDataUrl, {
+        maxDimension: 280,
+        targetMaxKB: 40,
+      });
+      onCropComplete(url);
+    } catch {
+      onCropComplete(rawDataUrl);
+    }
   };
 
   // Calcolo dimensioni per l'anteprima DOM

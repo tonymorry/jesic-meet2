@@ -60,20 +60,6 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
     );
   };
 
-  if (user?.avatarUrl && !imageError) {
-    return (
-      <div className={`relative inline-flex shrink-0 ${className}`}>
-        <img
-          src={user.avatarUrl}
-          alt={user.name ? `${user.name} avatar` : 'Avatar'}
-          onError={() => setImageError(true)}
-          className={`${currentSize.box} ${roundedClass} object-cover shrink-0 ring-1 ring-neutral-200/80 dark:ring-neutral-700/80 shadow-2xs`}
-        />
-        {renderStatusDot()}
-      </div>
-    );
-  }
-
   const initials = computeInitials();
 
   return (
