@@ -288,19 +288,6 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
                     {activeSubgroup ? activeSubgroup.name : activeGroup.name}
                   </h2>
 
-                  {/* Accanto al nome: solo ed esclusivamente l'ingranaggio per modificare l'intero gruppo o sottogruppo */}
-                  {canManageCurrent && (
-                    <button
-                      type="button"
-                      onClick={handleOpenCustomizeModal}
-                      className="p-1 sm:p-1.5 rounded-lg text-neutral-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0"
-                      title={activeSubgroup ? 'Modifica sottogruppo' : 'Modifica gruppo'}
-                      aria-label="Impostazioni gruppo"
-                    >
-                      <Settings className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                    </button>
-                  )}
-
                   {/* Badge Privacy: solo icona lucchetto o globo */}
                   <span
                     title={isCurrentPublic ? 'Pubblico' : 'Privato'}
@@ -375,16 +362,16 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
               );
             })()}
 
-            {/* Tasto Elimina (visibile solo a chi è autorizzato) */}
-            {canManageCurrent && (activeSubgroup ? Boolean(onDeleteSubgroup) : Boolean(onDeleteGroup)) && (
+            {/* Tasto Impostazioni con Ingranaggio (spostato al posto del cestino) */}
+            {canManageCurrent && (
               <button
                 type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-red-50 hover:bg-red-100 dark:bg-red-950/50 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-xs font-bold transition-all cursor-pointer shadow-2xs active:scale-95 border border-red-200/50 dark:border-red-900/40 shrink-0"
-                title={activeSubgroup ? 'Elimina questo sottogruppo' : 'Elimina questo gruppo'}
-                aria-label="Elimina"
+                onClick={handleOpenCustomizeModal}
+                className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 hover:text-purple-600 dark:hover:text-purple-400 text-xs font-bold transition-all flex items-center justify-center cursor-pointer shadow-2xs active:scale-95 border border-neutral-200/60 dark:border-neutral-700/60 shrink-0"
+                title={activeSubgroup ? 'Impostazioni sottogruppo' : 'Impostazioni gruppo'}
+                aria-label="Impostazioni"
               >
-                <Trash2 className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                <Settings className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
               </button>
             )}
           </div>
@@ -743,23 +730,42 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
                 </div>
               </div>
 
-              {/* Tasti Azione */}
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
-                <button
-                  type="button"
-                  onClick={() => setIsCustomizeOpen(false)}
-                  disabled={isSavingCustomization}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
-                >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingCustomization || !editName.trim()}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-sm cursor-pointer disabled:opacity-50"
-                >
-                  {isSavingCustomization ? 'Salvataggio...' : 'Salva Modifiche'}
-                </button>
+              {/* Tasti Azione con Cestino all'interno del modale impostazioni */}
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-neutral-100 dark:border-neutral-800">
+                {canManageCurrent && (activeSubgroup ? Boolean(onDeleteSubgroup) : Boolean(onDeleteGroup)) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomizeOpen(false);
+                      setShowDeleteConfirm(true);
+                    }}
+                    className="px-3 py-2 rounded-xl text-xs font-bold text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50 transition-colors flex items-center gap-1.5 cursor-pointer border border-red-200 dark:border-red-900/50"
+                    title={activeSubgroup ? 'Elimina questo sottogruppo' : 'Elimina questo gruppo'}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{activeSubgroup ? 'Elimina Sottogruppo' : 'Elimina Gruppo'}</span>
+                  </button>
+                ) : (
+                  <div />
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomizeOpen(false)}
+                    disabled={isSavingCustomization}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                  >
+                    Annulla
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingCustomization || !editName.trim()}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingCustomization ? 'Salvataggio...' : 'Salva Modifiche'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

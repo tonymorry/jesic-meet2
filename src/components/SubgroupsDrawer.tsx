@@ -1242,21 +1242,42 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                     </p>
                   )}
 
-                  <div className="flex items-center justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setEditingSubgroup(null)}
-                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 cursor-pointer"
-                    >
-                      Annulla
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isSavingEdit || !editName.trim()}
-                      className="px-4 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    >
-                      {isSavingEdit ? 'Salvataggio...' : 'Salva Modifiche'}
-                    </button>
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                    {onDeleteSubgroup ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          const sg = editingSubgroup;
+                          setEditingSubgroup(null);
+                          handleDeleteClick(sg, e);
+                        }}
+                        disabled={deletingId === editingSubgroup.id}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50 transition-colors flex items-center gap-1.5 cursor-pointer border border-red-200 dark:border-red-900/50"
+                        title="Elimina sottogruppo"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Elimina Sottogruppo</span>
+                      </button>
+                    ) : (
+                      <div />
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingSubgroup(null)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 cursor-pointer"
+                      >
+                        Annulla
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSavingEdit || !editName.trim()}
+                        className="px-4 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        {isSavingEdit ? 'Salvataggio...' : 'Salva Modifiche'}
+                      </button>
+                    </div>
                   </div>
                 </form>
               )}
@@ -1471,28 +1492,15 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                     </button>
                                   )}
 
-                                  {/* Tasto Modifica / Personalizza */}
+                                  {/* Tasto Impostazioni con Ingranaggio (il cestino è inserito all'interno del pannello impostazioni) */}
                                   {canManageSubgroup && (
                                     <button
                                       type="button"
                                       onClick={(e) => handleStartEdit(subgroup, e)}
-                                      title="Personalizza sottogruppo"
+                                      title="Impostazioni sottogruppo"
                                       className="p-1 rounded text-white/85 hover:text-white hover:bg-white/20 transition-colors cursor-pointer"
                                     >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-
-                                  {/* Tasto Elimina (Cestino) */}
-                                  {canDelete && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleDeleteClick(subgroup, e)}
-                                      disabled={deletingId === subgroup.id}
-                                      title="Elimina sottogruppo"
-                                      className="p-1 rounded text-white/85 hover:text-red-100 hover:bg-red-500/40 transition-colors cursor-pointer"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
+                                      <Settings className="w-3.5 h-3.5" />
                                     </button>
                                   )}
                                 </div>
