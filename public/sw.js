@@ -9,7 +9,10 @@
  * - Supporto Notifiche Push reali in background con click focus/navigation
  */
 
-const CACHE_NAME = 'jesic-pwa-v5';
+const CACHE_NAME = 'jesic-pwa-v6';
+
+// Tracciamento dei client aperti in modalità standalone (Web App installata sullo smartphone)
+const standaloneClientIds = new Set();
 
 // Installazione: salta l'attesa per attivarsi immediatamente
 self.addEventListener('install', (event) => {
@@ -34,10 +37,17 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Intercettazione messaggi dal client (es. comando esplicito di SKIP_WAITING)
+// Intercettazione messaggi dal client (SKIP_WAITING o registrazione client standalone)
 self.addEventListener('message', (event) => {
   if (event.data && (event.data.type === 'SKIP_WAITING' || event.data === 'skipWaiting')) {
     self.skipWaiting();
+  }
+  if (event.data && event.data.type === 'PWA_CLIENT_REGISTER' && event.source && event.source.id) {
+    if (event.data.isStandalone) {
+      standaloneClientIds.add(event.source.id);
+    } else {
+      standaloneClientIds.delete(event.source.id);
+    }
   }
 });
 
@@ -168,26 +178,60 @@ self.addEventListener('push', (event) => {
   );
 });
 
-// Click sulla notifica: apre o porta in primo piano l'applicazione
+// Click sulla notifica: apre o porta in primo piano l'applicazione Web App (PWA installata sullo smartphone)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const targetUrl = event.notification.data?.url || '/';
+  // Costruisci SEMPRE l'URL assoluto completo con protocollo e host corrispondenti allo scope della PWA.
+  // Su iOS Safari e Android WebAPK, i link relativi non vengono associati alla PWA installata
+  // e causano l'apertura errata del browser normale.
+  const rawTarget = event.notification.data?.url || '/';
+  const fullTargetUrl = new URL(rawTarget, self.location.origin).href;
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      for (const client of windowClients) {
-        if ('focus' in client) {
-          if (client.url && 'navigate' in client) {
-            client.navigate(targetUrl);
-          }
-          return client.focus();
+    (async () => {
+      const windowClients = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+
+      // 1. Cerca prima se una finestra dell'app PWA standalone è già aperta
+      const standaloneClient = windowClients.find(
+        (c) =>
+          standaloneClientIds.has(c.id) ||
+          (c.url && (c.url.includes('source=pwa') || c.url.startsWith(self.location.origin)))
+      );
+
+      // 2. Se una finestra dell'app è aperta, portala in primo piano e naviga
+      if (standaloneClient && 'focus' in standaloneClient) {
+        await standaloneClient.focus();
+        try {
+          standaloneClient.postMessage({
+            type: 'PWA_NAVIGATE_TO_URL',
+            url: fullTargetUrl,
+          });
+        } catch (postErr) {}
+        if ('navigate' in standaloneClient && standaloneClient.url !== fullTargetUrl) {
+          await standaloneClient.navigate(fullTargetUrl);
         }
+        return;
       }
 
+      // 3. Se l'app non è aperta (telefono bloccato, app chiusa o in background):
+      // clients.openWindow con URL assoluto corrispondente allo scope del manifest
+      // indica al sistema operativo mobile (Android WebAPK e iOS Standalone) di aprire l'applicazione scaricata!
       if (self.clients.openWindow) {
-        return self.clients.openWindow(targetUrl);
+        return self.clients.openWindow(fullTargetUrl);
       }
-    })
+
+      // 4. Fallback se openWindow non è disponibile
+      if (windowClients.length > 0 && 'focus' in windowClients[0]) {
+        const fallbackClient = windowClients[0];
+        await fallbackClient.focus();
+        if ('navigate' in fallbackClient) {
+          await fallbackClient.navigate(fullTargetUrl);
+        }
+      }
+    })()
   );
 });

@@ -13,13 +13,59 @@
 
 let isRefreshing = false;
 
+function notifyClientMode(): void {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+  const isStandalone =
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+
+  if (navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({
+      type: 'PWA_CLIENT_REGISTER',
+      isStandalone,
+    });
+  }
+}
+
 export function initPwaAutoUpdater(): void {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
     return;
   }
 
+  // Registra la modalità standalone con il Service Worker
+  notifyClientMode();
+
+  // Ascolta messaggi di navigazione inviati dal Service Worker su click di notifica
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'PWA_NAVIGATE_TO_URL' && event.data.url) {
+      try {
+        const targetUrl = new URL(event.data.url);
+        window.history.pushState({}, '', targetUrl.pathname + targetUrl.search + targetUrl.hash);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      } catch (e) {
+        window.location.href = event.data.url;
+      }
+    }
+  });
+
+  // Supporto per la Launch Queue API (Chrome/Edge/WebAPK PWA Launch Handler)
+  if (typeof window !== 'undefined' && 'launchQueue' in window && 'setConsumer' in (window as any).launchQueue) {
+    (window as any).launchQueue.setConsumer((launchParams: any) => {
+      if (launchParams && launchParams.targetURL) {
+        try {
+          const url = new URL(launchParams.targetURL);
+          window.history.pushState({}, '', url.pathname + url.search + url.hash);
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        } catch (e) {
+          window.location.href = launchParams.targetURL;
+        }
+      }
+    });
+  }
+
   // 1. All'evento 'controllerchange' (il nuovo SW ha preso il controllo), aggiorna la pagina
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    notifyClientMode();
     if (isRefreshing) return;
     isRefreshing = true;
 
@@ -43,6 +89,11 @@ export function initPwaAutoUpdater(): void {
       });
 
       console.log('📱 [PWA] Service Worker registrato con successo.');
+
+      // Notifica lo stato standalone una volta pronto
+      navigator.serviceWorker.ready.then(() => {
+        notifyClientMode();
+      });
 
       // Se c'è già un worker in attesa, chiedigli di saltare l'attesa
       if (registration.waiting) {
@@ -68,6 +119,7 @@ export function initPwaAutoUpdater(): void {
       // 3. Controllo aggiornamenti quando l'utente riapre l'app dallo sfondo (smartphone)
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
+          notifyClientMode();
           registration.update().catch(() => {});
         }
       });
