@@ -262,11 +262,11 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
             <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
               {/* Quadratone Avatar Icona o Immagine ingrandito: del Sottogruppo se attivo, altrimenti del Gruppo Principale */}
               <div
-                className="shrink-0 p-1 sm:p-1.5 rounded-2xl transition-all flex items-center justify-center"
+                className="shrink-0 p-1 sm:p-1.5 rounded-2xl transition-all flex items-center justify-center text-white"
                 style={activeSubgroup ? {
-                  backgroundColor: `${subColor}22`,
-                  border: `2px solid ${subColor}55`,
-                  boxShadow: `0 2px 8px ${subColor}25`,
+                  backgroundColor: subColor,
+                  border: `2px solid ${subColor}`,
+                  boxShadow: `0 3px 12px ${subColor}40`,
                 } : undefined}
               >
                 <GroupAvatar
@@ -282,7 +282,8 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
                 <div className="flex items-center gap-2 min-w-0">
                   <h2
                     title={activeSubgroup ? activeSubgroup.name : activeGroup.name}
-                    className="text-sm sm:text-lg font-black text-neutral-900 dark:text-white truncate leading-snug min-w-0"
+                    className="text-sm sm:text-lg font-black truncate leading-snug min-w-0 text-neutral-900 dark:text-white"
+                    style={activeSubgroup ? { color: subColor } : undefined}
                   >
                     {activeSubgroup ? activeSubgroup.name : activeGroup.name}
                   </h2>

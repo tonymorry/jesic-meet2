@@ -176,6 +176,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 }) => {
   const subgroupId = activeSubgroup ? activeSubgroup.id : null;
   const contextName = activeSubgroup ? activeSubgroup.name : `${activeGroup.name} (Generale)`;
+  const chatColor = activeSubgroup?.color || (activeSubgroup ? '#8b5cf6' : '#f23e2e');
 
   // Inizializzazione sincrona istantanea da Cache in memoria o localStorage (0 millisecondi)
   const initialCached = getCachedChat(activeGroup.id, subgroupId);
@@ -1189,7 +1190,18 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
           </div>
         </div>
       ) : (
-        <div className="px-3 sm:px-4 py-2.5 sm:py-3 bg-white dark:bg-neutral-900 border-b border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between shadow-2xs z-10 shrink-0">
+        <div
+          className="px-3 sm:px-4 py-2.5 sm:py-3 bg-white dark:bg-neutral-900 border-b border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between shadow-2xs z-10 shrink-0 transition-colors"
+          style={
+            activeSubgroup
+              ? {
+                  borderTop: `3px solid ${chatColor}`,
+                  borderBottomColor: `${chatColor}30`,
+                  backgroundImage: `linear-gradient(to right, ${chatColor}14, transparent 65%)`,
+                }
+              : undefined
+          }
+        >
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
             {onBackToDashboard && (
               <button
@@ -1203,11 +1215,11 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               </button>
             )}
             <div
-              className={`w-8 h-8 sm:w-9 sm:h-9 rounded-2xl flex items-center justify-center shrink-0 shadow-2xs ${
-                activeSubgroup
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-[#f23e2e] text-white'
-              }`}
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl flex items-center justify-center shrink-0 shadow-xs text-white"
+              style={{
+                backgroundColor: chatColor,
+                boxShadow: `0 2px 8px ${chatColor}40`,
+              }}
             >
               {activeSubgroup ? (
                 <FolderOpen className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.2px]" />
@@ -1217,15 +1229,26 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white truncate">
+                <h2
+                  className="text-xs sm:text-sm font-black truncate text-neutral-900 dark:text-white"
+                  style={activeSubgroup ? { color: chatColor } : undefined}
+                >
                   {activeSubgroup ? activeSubgroup.name : 'Chat Generale'}
                 </h2>
                 <span
-                  className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.2 rounded-full ${
+                  className="text-[9px] font-black uppercase tracking-wider px-2 py-0.2 rounded-full"
+                  style={
                     activeSubgroup
-                      ? 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300'
-                      : 'bg-red-100 dark:bg-red-950 text-[#f23e2e]'
-                  }`}
+                      ? {
+                          backgroundColor: `${chatColor}20`,
+                          color: chatColor,
+                          border: `1px solid ${chatColor}45`,
+                        }
+                      : {
+                          backgroundColor: '#fee2e2',
+                          color: '#f23e2e',
+                        }
+                  }
                 >
                   {activeSubgroup ? (activeSubgroup.parentId ? 'Sotto-sottogruppo' : 'Sottogruppo') : 'Generale'}
                 </span>
@@ -1242,7 +1265,14 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 
           <div className="flex items-center gap-2">
             {activeSubgroup?.code && (
-              <span className="text-[10px] font-mono font-bold bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300">
+              <span
+                className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border"
+                style={{
+                  backgroundColor: `${chatColor}15`,
+                  borderColor: `${chatColor}40`,
+                  color: chatColor,
+                }}
+              >
                 🔑 {activeSubgroup.code}
               </span>
             )}

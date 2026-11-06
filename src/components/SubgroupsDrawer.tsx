@@ -1319,14 +1319,13 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                           <div
                             className={`rounded-xl border transition-all overflow-hidden ${
                               isSelected
-                                ? 'shadow-xs'
-                                : 'bg-white dark:bg-neutral-800/70 border-neutral-200 dark:border-neutral-700/80 hover:border-neutral-300 dark:hover:border-neutral-600'
+                                ? 'shadow-md ring-2 ring-white/90 scale-[1.01]'
+                                : 'shadow-xs hover:shadow-md hover:scale-[1.005]'
                             }`}
                             style={{
-                              borderLeftWidth: '5px',
-                              borderLeftColor: itemColor,
-                              borderColor: isSelected ? itemColor : undefined,
-                              backgroundColor: isSelected ? `${itemColor}15` : undefined,
+                              backgroundColor: itemColor,
+                              borderColor: isSelected ? '#ffffff' : `${itemColor}dd`,
+                              color: '#ffffff',
                             }}
                           >
                             <div
@@ -1340,7 +1339,7 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                   setUnlockError(null);
                                 }
                               }}
-                              className="w-full px-2.5 py-1.5 flex items-center justify-between gap-2 cursor-pointer hover:bg-neutral-50/60 dark:hover:bg-neutral-800/50 transition-colors"
+                              className="w-full px-2.5 py-1.5 flex items-center justify-between gap-2 cursor-pointer hover:brightness-105 active:brightness-95 transition-all"
                             >
                               <div className="flex items-center gap-1.5 min-w-0 flex-1">
                                 {/* Freccetta verso il basso/destra per mostrare/nascondere i sotto-sottogruppi */}
@@ -1349,26 +1348,22 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                     type="button"
                                     onClick={(e) => toggleExpand(subgroup.id, e)}
                                     title={isExpanded ? 'Nascondi sotto-gruppi' : `Mostra ${childCount} sotto-gruppi collegati`}
-                                    className="w-5 h-5 -ml-0.5 rounded flex items-center justify-center text-neutral-500 dark:text-neutral-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-100/60 dark:hover:bg-purple-950/60 transition-colors cursor-pointer shrink-0"
+                                    className="w-5 h-5 -ml-0.5 rounded flex items-center justify-center text-white/85 hover:text-white hover:bg-white/20 transition-colors cursor-pointer shrink-0"
                                   >
                                     {isExpanded ? (
-                                      <ChevronDown className="w-3.5 h-3.5 stroke-[2.5px] text-purple-600 dark:text-purple-400" />
+                                      <ChevronDown className="w-3.5 h-3.5 stroke-[2.5px] text-white" />
                                     ) : (
-                                      <ChevronRight className="w-3.5 h-3.5 stroke-[2.5px]" />
+                                      <ChevronRight className="w-3.5 h-3.5 stroke-[2.5px] text-white" />
                                     )}
                                   </button>
                                 ) : depth > 0 ? (
-                                  <span className="w-4 text-purple-400 dark:text-purple-500 font-mono font-bold text-xs shrink-0 select-none text-center">
+                                  <span className="w-4 text-white/80 font-mono font-bold text-xs shrink-0 select-none text-center">
                                     ↳
                                   </span>
                                 ) : null}
 
                                 <div
-                                  className="p-1 rounded-xl shrink-0 transition-all flex items-center justify-center"
-                                  style={{
-                                    backgroundColor: `${itemColor}18`,
-                                    border: `1.5px solid ${itemColor}35`,
-                                  }}
+                                  className="p-1 rounded-xl shrink-0 transition-all flex items-center justify-center bg-white/20 border border-white/35 backdrop-blur-xs text-white"
                                 >
                                   <GroupAvatar
                                     avatar={subgroup.avatar}
@@ -1380,16 +1375,12 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
 
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5 flex-wrap">
-                                    <p className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+                                    <p className="text-xs font-black text-white truncate drop-shadow-xs">
                                       {subgroup.name}
                                     </p>
 
                                     <span
-                                      className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-full border ${
-                                        subgroup.isPublic
-                                          ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                                          : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
-                                      }`}
+                                      className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-black/25 text-white border border-white/30 backdrop-blur-xs"
                                     >
                                       {subgroup.isPublic ? '🌐' : '🔒'}
                                     </span>
@@ -1399,30 +1390,30 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                         type="button"
                                         onClick={(e) => toggleExpand(subgroup.id, e)}
                                         title={isExpanded ? 'Clicca per comprimere' : 'Clicca per mostrare'}
-                                        className="text-[8px] font-bold px-1.5 py-0.2 rounded-full bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 transition-colors flex items-center gap-0.5 cursor-pointer"
+                                        className="text-[8px] font-bold px-1.5 py-0.2 rounded-full bg-black/25 text-white border border-white/30 hover:bg-black/35 transition-colors flex items-center gap-0.5 cursor-pointer backdrop-blur-xs"
                                       >
                                         <span>📁 {childCount}</span>
                                         {isExpanded ? (
-                                          <ChevronDown className="w-2.5 h-2.5" />
+                                          <ChevronDown className="w-2.5 h-2.5 text-white" />
                                         ) : (
-                                          <ChevronRight className="w-2.5 h-2.5" />
+                                          <ChevronRight className="w-2.5 h-2.5 text-white" />
                                         )}
                                       </button>
                                     )}
 
                                     {!hasAccess && (
-                                      <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                      <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-full bg-amber-400 text-amber-950 border border-amber-300">
                                         🔒 Codice
                                       </span>
                                     )}
                                   </div>
 
                                   {subgroup.description ? (
-                                    <p className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate">
+                                    <p className="text-[10px] text-white/85 truncate">
                                       {parentName ? `in ${parentName} • ` : ''}{subgroup.description}
                                     </p>
                                   ) : parentName ? (
-                                    <p className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate">
+                                    <p className="text-[10px] text-white/85 truncate">
                                       ↳ Sotto a {parentName}
                                     </p>
                                   ) : null}
@@ -1435,8 +1426,8 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                 <div className="flex items-center gap-1">
                                   {isSelected && (
                                     <span
-                                      className="w-4 h-4 rounded-full text-white flex items-center justify-center shrink-0"
-                                      style={{ backgroundColor: itemColor }}
+                                      className="w-4 h-4 rounded-full bg-white flex items-center justify-center shrink-0 shadow-xs"
+                                      style={{ color: itemColor }}
                                     >
                                       <Check className="w-2.5 h-2.5 stroke-[3px]" />
                                     </span>
@@ -1448,16 +1439,16 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                       type="button"
                                       onClick={(e) => handleCopyCode(subgroup, e)}
                                       title="Copia codice di accesso sottogruppo"
-                                      className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:text-[#f23e2e] flex items-center gap-1 transition-colors cursor-pointer"
+                                      className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-white/20 hover:bg-white/30 text-white border border-white/25 flex items-center gap-1 transition-colors cursor-pointer backdrop-blur-xs"
                                     >
                                       {copiedCodeSubgroupId === subgroup.id ? (
                                         <>
-                                          <Check className="w-2.5 h-2.5 text-emerald-600" />
-                                          <span className="text-emerald-600">OK</span>
+                                          <Check className="w-2.5 h-2.5 text-emerald-300" />
+                                          <span className="text-emerald-300">OK</span>
                                         </>
                                       ) : (
                                         <>
-                                          <Copy className="w-2.5 h-2.5" />
+                                          <Copy className="w-2.5 h-2.5 text-white/90" />
                                           <span>{subgroup.code}</span>
                                         </>
                                       )}
@@ -1473,7 +1464,7 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                         setEnteredCode('');
                                         setUnlockError(null);
                                       }}
-                                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-1 shadow-2xs cursor-pointer"
+                                      className="px-2 py-0.5 rounded text-[10px] font-black bg-white text-neutral-900 hover:bg-white/90 flex items-center gap-1 shadow-xs cursor-pointer"
                                     >
                                       <KeyRound className="w-2.5 h-2.5" />
                                       <span>Entra</span>
@@ -1486,7 +1477,7 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                       type="button"
                                       onClick={(e) => handleStartEdit(subgroup, e)}
                                       title="Personalizza sottogruppo"
-                                      className="p-1 rounded text-neutral-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors cursor-pointer"
+                                      className="p-1 rounded text-white/85 hover:text-white hover:bg-white/20 transition-colors cursor-pointer"
                                     >
                                       <Edit2 className="w-3.5 h-3.5" />
                                     </button>
@@ -1499,7 +1490,7 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                       onClick={(e) => handleDeleteClick(subgroup, e)}
                                       disabled={deletingId === subgroup.id}
                                       title="Elimina sottogruppo"
-                                      className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/50 transition-colors cursor-pointer"
+                                      className="p-1 rounded text-white/85 hover:text-red-100 hover:bg-red-500/40 transition-colors cursor-pointer"
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
                                     </button>
@@ -1517,7 +1508,7 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                                       setIsCreating(true);
                                     }}
                                     title={`Aggiungi sotto-cartella in "${subgroup.name}"`}
-                                    className="w-5 h-5 rounded-md flex items-center justify-center text-purple-600 dark:text-purple-300 hover:text-purple-700 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/60 dark:hover:bg-purple-900 border border-purple-200 dark:border-purple-800 transition-all cursor-pointer shadow-2xs"
+                                    className="w-5 h-5 rounded-md flex items-center justify-center text-white bg-white/20 hover:bg-white/30 border border-white/30 transition-all cursor-pointer shadow-xs backdrop-blur-xs"
                                   >
                                     <Plus className="w-3.5 h-3.5 stroke-[2.5px]" />
                                   </button>
