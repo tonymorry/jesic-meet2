@@ -165,6 +165,11 @@ export interface ChatReplyTo {
   attachmentType?: 'image' | 'audio' | 'file';
 }
 
+export interface ChatReadReceipt {
+  userId: string;
+  readAt: string;
+}
+
 export interface ChatMessage {
   id: string;
   groupId: string;
@@ -178,6 +183,7 @@ export interface ChatMessage {
   replyTo?: ChatReplyTo;
   isEdited?: boolean;
   editedAt?: string;
+  readBy?: ChatReadReceipt[];
   createdAt: string;
 }
 

@@ -1692,7 +1692,7 @@ app.get('/api/groups/:id/chat', async (req: Request, res: Response) => {
     const afterParam = (req.query.after || req.query.since) as string;
     const afterDate = afterParam ? new Date(afterParam) : null;
 
-    const ESSENTIAL_FIELDS = '_id id groupId subgroupId authorId authorName authorSurname authorAvatar content attachment replyTo isEdited editedAt createdAt';
+    const ESSENTIAL_FIELDS = '_id id groupId subgroupId authorId authorName authorSurname authorAvatar content attachment replyTo isEdited editedAt readBy createdAt';
 
     // Limite di vita per ciascun messaggio: esattamente 50 giorni dalla creazione (singola scadenza rolling)
     const fiftyDaysAgo = new Date(Date.now() - 50 * 24 * 60 * 60 * 1000);
@@ -1721,6 +1721,7 @@ app.get('/api/groups/:id/chat', async (req: Request, res: Response) => {
         replyTo: m.replyTo || undefined,
         isEdited: Boolean(m.isEdited),
         editedAt: m.editedAt || undefined,
+        readBy: Array.isArray(m.readBy) ? m.readBy : [],
         createdAt: m.createdAt,
       }));
 
@@ -1763,6 +1764,7 @@ app.get('/api/groups/:id/chat', async (req: Request, res: Response) => {
       replyTo: m.replyTo || undefined,
       isEdited: Boolean(m.isEdited),
       editedAt: m.editedAt || undefined,
+      readBy: Array.isArray(m.readBy) ? m.readBy : [],
       createdAt: m.createdAt,
     }));
 
@@ -1797,6 +1799,8 @@ app.post('/api/groups/:id/chat', async (req: Request, res: Response) => {
         ? String(subgroupId).trim()
         : null;
 
+    const initialReadBy = [{ userId: authorId, readAt: new Date().toISOString() }];
+
     const created: any = await ChatMessageModel.create({
       groupId: id,
       subgroupId: cleanSubgroupId,
@@ -1809,6 +1813,7 @@ app.post('/api/groups/:id/chat', async (req: Request, res: Response) => {
       replyTo: replyTo || undefined,
       isEdited: false,
       editedAt: undefined,
+      readBy: initialReadBy,
     });
 
     const mapped = {
@@ -1824,6 +1829,7 @@ app.post('/api/groups/:id/chat', async (req: Request, res: Response) => {
       replyTo: created.replyTo,
       isEdited: false,
       editedAt: undefined,
+      readBy: initialReadBy,
       createdAt: created.createdAt,
     };
 
@@ -1848,6 +1854,70 @@ app.post('/api/groups/:id/chat', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Errore invio messaggio chat MongoDB:', err.message);
     return res.status(500).json({ error: 'Errore durante il salvataggio del messaggio in MongoDB' });
+  }
+});
+
+// POST /api/groups/:id/chat/mark-read - Segna i messaggi come letti per un utente
+app.post('/api/groups/:id/chat/mark-read', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { subgroupId, userId, messageIds } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId obbligatorio' });
+  }
+
+  try {
+    const cleanSub =
+      subgroupId &&
+      subgroupId !== 'null' &&
+      subgroupId !== 'undefined' &&
+      String(subgroupId).trim() !== ''
+        ? String(subgroupId).trim()
+        : null;
+
+    let filter: any = { groupId: id };
+    if (cleanSub) {
+      filter.subgroupId = cleanSub;
+    } else {
+      filter.$or = [
+        { subgroupId: null },
+        { subgroupId: '' },
+        { subgroupId: 'null' },
+        { subgroupId: { $exists: false } },
+      ];
+    }
+
+    if (Array.isArray(messageIds) && messageIds.length > 0) {
+      filter._id = { $in: messageIds };
+    }
+
+    // Aggiorna solo i messaggi che non contengono già userId in readBy
+    filter['readBy.userId'] = { $ne: userId };
+
+    const readAt = new Date().toISOString();
+    const updateResult = await ChatMessageModel.updateMany(
+      filter,
+      {
+        $push: {
+          readBy: { userId, readAt },
+        },
+      }
+    );
+
+    if (updateResult.modifiedCount > 0) {
+      broadcastRealtimeEvent('chat:messages_read', {
+        groupId: id,
+        subgroupId: cleanSub,
+        userId,
+        readAt,
+        messageIds: Array.isArray(messageIds) && messageIds.length > 0 ? messageIds : undefined,
+      });
+    }
+
+    return res.json({ success: true, modifiedCount: updateResult.modifiedCount });
+  } catch (err: any) {
+    console.error('Errore mark-read chat MongoDB:', err.message);
+    return res.status(500).json({ error: 'Errore durante la marcatura dei messaggi come letti' });
   }
 });
 

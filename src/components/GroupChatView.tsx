@@ -9,8 +9,8 @@
  * - Richiamo / Risposta ai messaggi (Quote / Reply stile WhatsApp con scroll al messaggio citato)
  */
 
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { Group, Subgroup, User, ChatMessage, ChatAttachment, ChatReplyTo } from '../types';
+import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
+import { Group, Subgroup, User, ChatMessage, ChatAttachment, ChatReplyTo, ChatReadReceipt } from '../types';
 import { UserAvatar } from './UserAvatar';
 import { useRealtimeSubscription } from '../utils/realtime';
 import {
@@ -37,6 +37,7 @@ import {
   ArrowLeft,
   Copy,
   Loader2,
+  Info,
 } from 'lucide-react';
 import {
   getCachedChat,
@@ -209,10 +210,69 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 
   // Selezione Messaggio per Pressione Prolungata (Long Press stile WhatsApp su smartphone)
   const [selectedMessage, setSelectedMessage] = useState<ChatMessage | null>(null);
+  const [infoModalMessage, setInfoModalMessage] = useState<ChatMessage | null>(null);
   const [copiedToast, setCopiedToast] = useState(false);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const isLongPressActiveRef = useRef(false);
+  const pendingMarkReadIdsRef = useRef<Set<string>>(new Set());
+
+  // Elenco partecipanti effettivi della conversazione (Gruppo Generale o Sottogruppo)
+  const targetMemberIds = useMemo<string[]>(() => {
+    const groupMemberIds = (activeGroup.members || []).map((m: any) =>
+      typeof m === 'string' ? m : m.userId
+    );
+    if (activeSubgroup) {
+      const subMembers = Array.isArray(activeSubgroup.members) ? activeSubgroup.members : [];
+      if (activeSubgroup.isPublic) {
+        return Array.from(
+          new Set(
+            [
+              activeGroup.creatorId,
+              ...groupMemberIds,
+              activeSubgroup.createdBy,
+              ...subMembers,
+            ].filter(Boolean)
+          )
+        );
+      }
+      return Array.from(
+        new Set([activeSubgroup.createdBy, ...subMembers].filter(Boolean))
+      );
+    }
+    return Array.from(new Set([activeGroup.creatorId, ...groupMemberIds].filter(Boolean)));
+  }, [activeGroup.creatorId, activeGroup.members, activeSubgroup]);
+
+  // Formattazione data e ora per ricevute di lettura in stile WhatsApp
+  const formatReceiptDateTime = (isoString?: string) => {
+    if (!isoString) return '';
+    try {
+      const d = new Date(isoString);
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      const timeStr = new Intl.DateTimeFormat('it-IT', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(d);
+
+      if (isToday) {
+        return `Oggi alle ${timeStr}`;
+      }
+      const yesterday = new Date();
+      yesterday.setDate(now.getDate() - 1);
+      if (d.toDateString() === yesterday.toDateString()) {
+        return `Ieri alle ${timeStr}`;
+      }
+      const dateStr = new Intl.DateTimeFormat('it-IT', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }).format(d);
+      return `${dateStr} alle ${timeStr}`;
+    } catch {
+      return '';
+    }
+  };
 
   // Ruolo per moderazione
   const isGroupAdmin =
@@ -470,6 +530,92 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       removeMessageFromCache(activeGroup.id, currentSub, payload.messageId);
     }
   });
+
+  // Ascolto real-time: Ricevute di lettura messaggi (Doppia spunta blu istantanea stile WhatsApp)
+  useRealtimeSubscription('chat:messages_read', (payload) => {
+    if (!payload || payload.groupId !== activeGroup.id) return;
+    const currentSub = subgroupId ? String(subgroupId).trim() : null;
+    const msgSub = payload.subgroupId && payload.subgroupId !== 'null' ? String(payload.subgroupId).trim() : null;
+    if (currentSub !== msgSub) return;
+
+    setMessages((prev) => {
+      let hasChanged = false;
+      const updated = prev.map((msg) => {
+        if (
+          Array.isArray(payload.messageIds) &&
+          payload.messageIds.length > 0 &&
+          !payload.messageIds.includes(msg.id)
+        ) {
+          return msg;
+        }
+        const existingRead = Array.isArray(msg.readBy) ? msg.readBy : [];
+        if (existingRead.some((r) => r.userId === payload.userId)) {
+          return msg;
+        }
+        hasChanged = true;
+        const newReadBy = [...existingRead, { userId: payload.userId, readAt: payload.readAt }];
+        const nextMsg = { ...msg, readBy: newReadBy };
+        updateMessageInCache(activeGroup.id, currentSub, nextMsg);
+        return nextMsg;
+      });
+
+      if (hasChanged && infoModalMessage) {
+        const refreshedInfo = updated.find((m) => m.id === infoModalMessage.id);
+        if (refreshedInfo) setInfoModalMessage(refreshedInfo);
+      }
+
+      return hasChanged ? updated : prev;
+    });
+  });
+
+  // Segna automaticamente come letti i messaggi ricevuti quando la chat è aperta
+  useEffect(() => {
+    if (!currentUser?.id || messages.length === 0) return;
+
+    const unreadMsgIds = messages
+      .filter(
+        (m) =>
+          !m.id.startsWith('msg-opt-') &&
+          m.authorId !== currentUser.id &&
+          !m.readBy?.some((r) => r.userId === currentUser.id)
+      )
+      .map((m) => m.id)
+      .filter((id) => !pendingMarkReadIdsRef.current.has(id));
+
+    if (unreadMsgIds.length === 0) return;
+
+    unreadMsgIds.forEach((id) => pendingMarkReadIdsRef.current.add(id));
+
+    // Chiamata backend per registrare la lettura
+    fetch(`/api/groups/${activeGroup.id}/chat/mark-read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subgroupId: subgroupId || undefined,
+        userId: currentUser.id,
+        messageIds: unreadMsgIds,
+      }),
+    }).catch((err) => console.warn('[Chat] Errore invio mark-read:', err));
+
+    // Aggiornamento ottimistico locale
+    const now = new Date().toISOString();
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (unreadMsgIds.includes(msg.id)) {
+          const existing = Array.isArray(msg.readBy) ? msg.readBy : [];
+          if (!existing.some((r) => r.userId === currentUser.id)) {
+            const nextMsg = {
+              ...msg,
+              readBy: [...existing, { userId: currentUser.id, readAt: now }],
+            };
+            updateMessageInCache(activeGroup.id, subgroupId, nextMsg);
+            return nextMsg;
+          }
+        }
+        return msg;
+      })
+    );
+  }, [messages, currentUser?.id, activeGroup.id, subgroupId]);
 
   // Gestione scroll della vista messaggi
   const handleContainerScroll = () => {
@@ -1140,6 +1286,20 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               </button>
             )}
 
+            {/* Tasto Info Messaggio (Chi ha visualizzato / letto) */}
+            <button
+              type="button"
+              onClick={() => {
+                setInfoModalMessage(selectedMessage);
+                setSelectedMessage(null);
+              }}
+              title="Info messaggio (Visualizzazioni)"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-neutral-800 hover:bg-sky-600 active:bg-sky-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
+            >
+              <Info className="w-3.5 h-3.5 text-sky-400" />
+              <span className="hidden sm:inline">Info</span>
+            </button>
+
             {/* Se è un messaggio inviato dall'utente attuale: Modifica ed Elimina */}
             {selectedMessage.authorId === currentUser.id && (
               <>
@@ -1760,11 +1920,34 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                           <span title="Invio in corso su MongoDB..." className="flex items-center text-neutral-400">
                             <Clock className="w-3 h-3 animate-pulse" />
                           </span>
-                        ) : (
-                          <span title="Consegnato e salvato" className="flex items-center">
-                            <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb]" />
-                          </span>
-                        )
+                        ) : (() => {
+                          const otherMembers = targetMemberIds.filter((id) => id !== currentUser.id);
+                          const readCount = otherMembers.filter((id) =>
+                            msg.readBy?.some((r) => r.userId === id)
+                          ).length;
+                          const isReadByAll = otherMembers.length > 0 && readCount === otherMembers.length;
+
+                          return (
+                            <span
+                              title={
+                                isReadByAll
+                                  ? `Letto da tutti (${readCount}/${otherMembers.length})`
+                                  : readCount > 0
+                                  ? `Letto da ${readCount} su ${otherMembers.length} partecipanti`
+                                  : 'Consegnato (in attesa di lettura)'
+                              }
+                              className="flex items-center ml-0.5"
+                            >
+                              <CheckCheck
+                                className={`w-3.5 h-3.5 transition-colors ${
+                                  isReadByAll
+                                    ? 'text-[#53bdeb]'
+                                    : 'text-neutral-400 dark:text-neutral-500'
+                                }`}
+                              />
+                            </span>
+                          );
+                        })()
                       )}
                     </div>
                   </div>
@@ -1778,6 +1961,16 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                       className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer"
                     >
                       <CornerUpLeft className="w-3.5 h-3.5" />
+                    </button>
+
+                    {/* Tasto Info Messaggio Desktop */}
+                    <button
+                      type="button"
+                      onClick={() => setInfoModalMessage(msg)}
+                      title="Info messaggio (Visualizzazioni)"
+                      className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 hover:text-sky-500 transition-colors cursor-pointer"
+                    >
+                      <Info className="w-3.5 h-3.5" />
                     </button>
 
                     {isMe && (
@@ -2021,6 +2214,244 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* MODALE INFO MESSAGGIO (Visualizzazioni e ricevute di lettura stile WhatsApp) */}
+      {infoModalMessage && (() => {
+        const otherMembers = targetMemberIds.filter((id) => id !== infoModalMessage.authorId);
+        const readEntries = Array.isArray(infoModalMessage.readBy) ? infoModalMessage.readBy : [];
+
+        // Membri che hanno letto il messaggio
+        const readMembers = otherMembers
+          .map((memberId) => {
+            const user = allUsers.find((u) => u.id === memberId);
+            const receipt = readEntries.find((r) => r.userId === memberId);
+            return {
+              id: memberId,
+              user,
+              readAt: receipt?.readAt,
+              isRead: Boolean(receipt),
+            };
+          })
+          .filter((item) => item.isRead)
+          .sort((a, b) => new Date(b.readAt || 0).getTime() - new Date(a.readAt || 0).getTime());
+
+        // Membri che non hanno ancora visualizzato
+        const unreadMembers = otherMembers
+          .map((memberId) => {
+            const user = allUsers.find((u) => u.id === memberId);
+            const isRead = readEntries.some((r) => r.userId === memberId);
+            return {
+              id: memberId,
+              user,
+              isRead,
+            };
+          })
+          .filter((item) => !item.isRead);
+
+        const isReadByAll = otherMembers.length > 0 && readMembers.length === otherMembers.length;
+
+        return (
+          <div
+            onClick={() => setInfoModalMessage(null)}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white dark:bg-neutral-900 w-full max-w-md rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95"
+            >
+              {/* Header Modale */}
+              <div className="px-4 py-3 border-b border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between bg-neutral-50 dark:bg-neutral-900/80 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                    <Info className="w-4 h-4 stroke-[2.2px]" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-neutral-900 dark:text-white">
+                      Info messaggio
+                    </h3>
+                    <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                      Stato di lettura e visualizzazione
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInfoModalMessage(null)}
+                  className="p-1.5 rounded-xl hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Corpo Modale Scrollabile */}
+              <div className="p-4 overflow-y-auto space-y-4 flex-1">
+                {/* Anteprima del messaggio */}
+                <div className="p-3 rounded-2xl bg-[#d9fdd3] dark:bg-[#005c4b] border border-emerald-200/60 dark:border-emerald-700/40 text-neutral-900 dark:text-white text-xs space-y-1.5 shadow-2xs">
+                  <div className="flex items-center justify-between text-[10px] text-neutral-500 dark:text-neutral-300 font-semibold pb-1 border-b border-emerald-300/40 dark:border-emerald-600/30">
+                    <span>
+                      {infoModalMessage.authorName} {infoModalMessage.authorSurname}
+                    </span>
+                    <span>{formatReceiptDateTime(infoModalMessage.createdAt)}</span>
+                  </div>
+                  {infoModalMessage.attachment && (
+                    <div className="text-[11px] font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-1.5">
+                      {infoModalMessage.attachment.type === 'image' && '📷 Foto allegata'}
+                      {infoModalMessage.attachment.type === 'audio' && '🎙️ Nota vocale'}
+                      {infoModalMessage.attachment.type === 'file' &&
+                        `📄 ${infoModalMessage.attachment.name || 'Documento'}`}
+                    </div>
+                  )}
+                  {infoModalMessage.content && (
+                    <p className="whitespace-pre-wrap break-words">{infoModalMessage.content}</p>
+                  )}
+                </div>
+
+                {/* Statistiche WhatsApp */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2.5 rounded-2xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200/80 dark:border-sky-800/60 flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-sky-500 text-white flex items-center justify-center shrink-0">
+                      <CheckCheck className="w-4 h-4 stroke-[2.5px]" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase font-black tracking-wider text-sky-700 dark:text-sky-300">
+                        Letti
+                      </p>
+                      <p className="text-sm font-black text-neutral-900 dark:text-white">
+                        {readMembers.length}{' '}
+                        <span className="text-[11px] font-normal text-neutral-500">
+                          / {otherMembers.length}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-2xl bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-neutral-400 text-white flex items-center justify-center shrink-0">
+                      <CheckCheck className="w-4 h-4 text-white stroke-[2.5px]" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase font-black tracking-wider text-neutral-600 dark:text-neutral-400">
+                        In attesa
+                      </p>
+                      <p className="text-sm font-black text-neutral-900 dark:text-white">
+                        {unreadMembers.length}{' '}
+                        <span className="text-[11px] font-normal text-neutral-500">rimanenti</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SEZIONE 1: Letto da */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <CheckCheck className="w-4 h-4 text-[#53bdeb]" />
+                      <h4 className="text-xs font-black uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
+                        Letto da ({readMembers.length})
+                      </h4>
+                    </div>
+                    {isReadByAll && (
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                        Tutti
+                      </span>
+                    )}
+                  </div>
+
+                  {readMembers.length === 0 ? (
+                    <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-800/40 border border-dashed border-neutral-200 dark:border-neutral-700 text-center">
+                      <p className="text-[11px] text-neutral-400">
+                        Nessun membro ha ancora visualizzato questo messaggio.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-neutral-100 dark:divide-neutral-800 rounded-2xl border border-neutral-200/80 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/50 overflow-hidden">
+                      {readMembers.map((m) => {
+                        const name = m.user ? `${m.user.name} ${m.user.surname}` : 'Membro';
+                        return (
+                          <div key={m.id} className="p-2.5 flex items-center justify-between gap-2.5">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <UserAvatar
+                                user={m.user}
+                                size="sm"
+                                className="w-8 h-8 text-xs shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+                                  {name}
+                                </p>
+                                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                                  {formatReceiptDateTime(m.readAt)}
+                                </p>
+                              </div>
+                            </div>
+                            <span className="text-[#53bdeb] shrink-0">
+                              <CheckCheck className="w-4 h-4" />
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* SEZIONE 2: Non ancora letto da */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCheck className="w-4 h-4 text-neutral-400 dark:text-neutral-500" />
+                    <h4 className="text-xs font-black uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
+                      Non ancora letto da ({unreadMembers.length})
+                    </h4>
+                  </div>
+
+                  {unreadMembers.length === 0 ? (
+                    <div className="p-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 text-center flex items-center justify-center gap-1.5 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
+                      <Check className="w-4 h-4 stroke-[3px]" />
+                      <span>Visualizzato da tutti i membri del gruppo</span>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-neutral-100 dark:divide-neutral-800 rounded-2xl border border-neutral-200/80 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/50 overflow-hidden">
+                      {unreadMembers.map((m) => {
+                        const name = m.user ? `${m.user.name} ${m.user.surname}` : 'Membro';
+                        return (
+                          <div key={m.id} className="p-2.5 flex items-center justify-between gap-2.5 opacity-85">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <UserAvatar
+                                user={m.user}
+                                size="sm"
+                                className="w-8 h-8 text-xs shrink-0 grayscale-[30%]"
+                              />
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-neutral-900 dark:text-white truncate">
+                                  {name}
+                                </p>
+                                <p className="text-[10px] text-neutral-400">In attesa di lettura</p>
+                              </div>
+                            </div>
+                            <span className="text-neutral-400 dark:text-neutral-500 shrink-0">
+                              <CheckCheck className="w-4 h-4" />
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="p-3 border-t border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/80 flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => setInfoModalMessage(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 cursor-pointer"
+                >
+                  Chiudi
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

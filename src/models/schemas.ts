@@ -813,6 +813,11 @@ export interface IChatReplyTo {
   attachmentType?: 'image' | 'audio' | 'file';
 }
 
+export interface IChatReadReceipt {
+  userId: string;
+  readAt: string;
+}
+
 export interface IChatMessage {
   _id?: string;
   id?: string;
@@ -827,6 +832,7 @@ export interface IChatMessage {
   replyTo?: IChatReplyTo;
   isEdited?: boolean;
   editedAt?: string | null;
+  readBy?: IChatReadReceipt[];
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -894,6 +900,16 @@ const ChatMessageSchema: Schema<IChatMessage> = new Schema(
     editedAt: {
       type: String,
       default: null,
+    },
+    readBy: {
+      type: [
+        {
+          userId: { type: String, required: true },
+          readAt: { type: String, required: true },
+          _id: false,
+        },
+      ],
+      default: [],
     },
   },
   {
