@@ -139,7 +139,6 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
 
   // Codice e Link (del sottogruppo o del gruppo principale)
   const currentCode = activeSubgroup?.code || activeGroup.code;
-  const isCurrentPublic = activeSubgroup ? Boolean(activeSubgroup.isPublic) : Boolean(activeGroup.isPublic);
 
 
   // Apertura modale personalizzazione per Gruppo o Sottogruppo
@@ -287,18 +286,6 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
                   >
                     {activeSubgroup ? activeSubgroup.name : activeGroup.name}
                   </h2>
-
-                  {/* Badge Privacy: solo icona lucchetto o globo */}
-                  <span
-                    title={isCurrentPublic ? 'Pubblico' : 'Privato'}
-                    className={`text-xs px-1.5 sm:px-2 py-0.5 rounded-full shrink-0 flex items-center justify-center border ${
-                      isCurrentPublic
-                        ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border-emerald-300/80 dark:border-emerald-800/60'
-                        : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
-                    }`}
-                  >
-                    {isCurrentPublic ? '🌐' : '🔒'}
-                  </span>
                 </div>
 
                 {/* SOTTO IL NOME: Breadcrumb gerarchico per sottogruppi (senza scritta ruolo) */}
