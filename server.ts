@@ -641,17 +641,25 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
     // Salva sempre nello store in-memory del server
     inMemoryResetCodes.set(cleanEmail, { code: otpCode, expires: expiresAt });
 
-    // Salva anche nel database MongoDB se disponibile
+    // Salva anche nel database MongoDB se disponibile (con timeout rigido di 2 secondi per evitare blocchi)
     let userFoundInDb = false;
     if (mongoose.connection.readyState === 1) {
       try {
-        const user = await UserModel.findOne({ email: cleanEmail });
-        if (user) {
-          userFoundInDb = true;
-          user.resetPasswordCode = otpCode;
-          user.resetPasswordExpires = new Date(expiresAt);
-          await user.save();
-        }
+        const dbPromise = (async () => {
+          const user = await UserModel.findOne({ email: cleanEmail });
+          if (user) {
+            userFoundInDb = true;
+            user.resetPasswordCode = otpCode;
+            user.resetPasswordExpires = new Date(expiresAt);
+            await user.save();
+          }
+        })();
+        const dbTimeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout DB operation')), 2000)
+        );
+        await Promise.race([dbPromise, dbTimeout]).catch((e) => {
+          console.warn('[Password Reset] MongoDB non ha risposto in 2s, procedo con codice in-memory:', e.message);
+        });
       } catch (dbErr: any) {
         console.warn('[Password Reset] Errore salvataggio codice su MongoDB:', dbErr.message);
       }
@@ -662,34 +670,55 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
     // Tentativo di invio email reale con nodemailer
     let emailSent = false;
     let mailError: string | null = null;
-    const hasSmtpConfig = Boolean(process.env.SMTP_USER || process.env.SMTP_HOST);
+    const smtpUser = process.env.SMTP_USER?.trim();
+    const smtpPass = process.env.SMTP_PASS?.trim();
+    const smtpHost = process.env.SMTP_HOST?.trim();
+    const hasSmtpConfig = Boolean((smtpUser && smtpPass) || smtpHost);
 
     if (hasSmtpConfig) {
       try {
-        const host = process.env.SMTP_HOST || 'smtp.gmail.com';
         const port = Number(process.env.SMTP_PORT) || 587;
         const secure = process.env.SMTP_SECURE === 'true' || port === 465;
+        const isGmail = (!smtpHost || smtpHost.includes('gmail')) && (smtpUser?.includes('@gmail.com') || process.env.SMTP_SERVICE === 'gmail');
 
-        const transporter = nodemailer.createTransport({
-          host,
-          port,
-          secure,
-          auth: process.env.SMTP_USER ? {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS,
-          } : undefined,
-          tls: {
-            rejectUnauthorized: false,
-          },
-        });
+        let transporter: any;
+        if (isGmail && smtpUser && smtpPass) {
+          // Modalità dedicata Gmail (gestisce host, port e TLS automaticamente)
+          transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+              user: smtpUser,
+              pass: smtpPass,
+            },
+            connectionTimeout: 8000,
+            greetingTimeout: 5000,
+            socketTimeout: 10000,
+          });
+        } else {
+          transporter = nodemailer.createTransport({
+            host: smtpHost || 'smtp.gmail.com',
+            port,
+            secure,
+            auth: smtpUser ? {
+              user: smtpUser,
+              pass: smtpPass,
+            } : undefined,
+            connectionTimeout: 8000,
+            greetingTimeout: 5000,
+            socketTimeout: 10000,
+            tls: {
+              rejectUnauthorized: false,
+            },
+          });
+        }
 
-        const fromAddress = process.env.SMTP_FROM || `"JESic Meet" <${process.env.SMTP_USER || 'info@jesic.it'}>`;
+        const fromAddress = process.env.SMTP_FROM || `"JESic Meet" <${smtpUser || 'info@jesic.it'}>`;
 
         await transporter.sendMail({
           from: fromAddress,
           to: cleanEmail,
           subject: 'Codice di recupero password - JESic Meet',
-          text: `Il tuo codice di verifica per recuperare la password di JESic Meet è: ${otpCode}. Il codice scade tra 15 minuti.`,
+          text: `Il tuo codice di verifica per recuperare la password di JESic Meet è: ${otpCode}. Il codice scade tra 15 minuti. Inseriscilo nell'applicazione per impostare una nuova password.`,
           html: `
             <div style="font-family: 'Ubuntu', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 16px; background-color: #ffffff;">
               <div style="display: flex; align-items: center; margin-bottom: 16px;">
@@ -707,26 +736,33 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
             </div>
           `,
         });
+
         emailSent = true;
         console.log(`[Password Reset] Email inviata con successo via SMTP a ${cleanEmail}`);
       } catch (err: any) {
         mailError = err.message || String(err);
-        console.warn(`[Password Reset] Invio email non riuscito (${mailError}). Fornito codice a video.`);
+        console.warn(`[Password Reset] Invio email non riuscito (${mailError})`);
       }
     } else {
-      console.log(`[Password Reset] Nessuna configurazione SMTP rilevata in process.env. Restituzione codice a schermo.`);
+      console.log(`[Password Reset] Nessuna credenziale SMTP trovata in process.env (SMTP_USER / SMTP_PASS mancanti).`);
+    }
+
+    if (!emailSent) {
+      if (!hasSmtpConfig) {
+        return res.status(503).json({
+          success: false,
+          error: "Il servizio di invio email non è configurato sul server. È necessario impostare le credenziali SMTP (SMTP_USER e SMTP_PASS) nelle variabili d'ambiente di hosting per consentire l'invio dell'email con il codice.",
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        error: `Impossibile recapitare l'email a ${cleanEmail}: ${mailError || 'errore del server di posta'}. Verifica la configurazione SMTP.`,
+      });
     }
 
     return res.json({
       success: true,
-      emailSent,
-      code: otpCode,
-      devCode: otpCode,
-      hasSmtpConfig,
-      mailError,
-      message: emailSent
-        ? `Abbiamo inviato un'email con il codice di sicurezza a ${cleanEmail}.`
-        : `Server email (SMTP) non configurato nell'ambiente di hosting. Il tuo codice univoco è pronto qui sotto.`,
+      message: `Abbiamo inviato un codice a 6 cifre all'indirizzo ${cleanEmail}. Controlla la posta in arrivo (e anche la cartella Spam).`,
     });
   } catch (err: any) {
     console.error('Errore /api/auth/forgot-password:', err.message);

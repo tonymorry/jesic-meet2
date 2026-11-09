@@ -82,8 +82,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
   const [forgotStep, setForgotStep] = useState<'request' | 'verify'>('request');
   const [isForgotLoading, setIsForgotLoading] = useState(false);
-  const [devCodeTip, setDevCodeTip] = useState<string | null>(null);
-  const [isEmailSent, setIsEmailSent] = useState<boolean | null>(null);
 
   // Hook useGoogleLogin con flow: 'auth-code' e scope Google Calendar Events
   const loginWithGoogle = useGoogleLogin({
@@ -218,12 +216,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
   };
 
-  // 1. Invio codice per password dimenticata
+  // 1. Invio codice per password dimenticata (esclusivamente via email)
   const handleForgotRequestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
-    setDevCodeTip(null);
 
     const cleanEmail = forgotEmail.trim().toLowerCase();
     if (!cleanEmail) {
@@ -232,41 +229,32 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
 
     setIsForgotLoading(true);
+
     try {
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: cleanEmail }),
       });
+
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        setErrorMsg(data.error || 'Impossibile generare il codice. Verifica l\'email inserita.');
+        setErrorMsg(data.error || 'Impossibile inviare l\'email con il codice. Verifica che l\'indirizzo sia corretto o controlla la configurazione SMTP.');
         return;
       }
 
-      const emailSent = Boolean(data.emailSent);
-      setIsEmailSent(emailSent);
-
-      if (emailSent) {
-        setSuccessMsg(`Abbiamo inviato un'email con il codice a ${cleanEmail}. Controlla la posta in arrivo (e anche la cartella Spam).`);
-      } else {
-        setSuccessMsg('Codice di sicurezza univoco a 6 cifre pronto!');
-      }
-
-      const code = String(data.code || data.devCode || '');
-      if (code) {
-        setDevCodeTip(code);
-        setForgotCode(code); // Pre-compila automaticamente per comodità immediata
-      }
+      setSuccessMsg(data.message || `Abbiamo inviato un codice a 6 cifre a ${cleanEmail}.`);
+      setForgotCode(''); // Nessun codice a video, deve arrivare solo via email
       setForgotStep('verify');
     } catch (err: any) {
-      setErrorMsg('Errore di connessione durante la richiesta del codice. Riprova.');
+      console.warn('[handleForgotRequestSubmit error]', err.message);
+      setErrorMsg('Errore di connessione durante l\'invio dell\'email. Riprova tra poco.');
     } finally {
       setIsForgotLoading(false);
     }
   };
 
-  // 2. Conferma OTP e impostazione nuova password
+  // 2. Conferma OTP ricevuto via email e impostazione nuova password
   const handleForgotResetSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -292,6 +280,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
 
     setIsForgotLoading(true);
+
     try {
       const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
@@ -302,13 +291,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           newPassword: cleanPass,
         }),
       });
+
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        setErrorMsg(data.error || 'Codice non valido o scaduto. Riprova.');
+        setErrorMsg(data.error || 'Codice non valido o scaduto. Verifica l\'email ricevuta o richiedine uno nuovo.');
         return;
       }
 
-      setSuccessMsg('Password reimpostata con successo! Inserisci la nuova password per accedere.');
+      setSuccessMsg('Password reimpostata con successo! Ora puoi accedere con la nuova password.');
       setLoginEmail(cleanEmail);
       setLoginPassword(cleanPass);
       setForgotStep('request');
@@ -317,7 +307,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       setForgotConfirmPassword('');
       setMode('login');
     } catch (err: any) {
-      setErrorMsg('Errore di rete durante la reimpostazione della password.');
+      setErrorMsg('Errore di connessione durante la reimpostazione della password. Riprova.');
     } finally {
       setIsForgotLoading(false);
     }
@@ -642,7 +632,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                         setForgotStep('request');
                         setErrorMsg(null);
                         setSuccessMsg(null);
-                        setDevCodeTip(null);
                         setMode('forgot');
                       }}
                       className="text-[11px] font-bold text-[#f23e2e] hover:underline cursor-pointer transition-colors"
@@ -703,7 +692,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       setMode('login');
                       setErrorMsg(null);
                       setSuccessMsg(null);
-                      setDevCodeTip(null);
                     }}
                     className="p-1.5 rounded-lg text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                     title="Torna ad Accedi"
@@ -722,42 +710,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   </div>
                 </div>
 
-                {/* Banner Consegna Email / Codice a Schermo */}
+                {/* Indicazione Consegna Email */}
                 {forgotStep === 'verify' && (
-                  <>
-                    {isEmailSent ? (
-                      <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs rounded-2xl flex items-start gap-2.5">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                        <div className="space-y-0.5">
-                          <p className="font-bold">Email inviata con successo!</p>
-                          <p className="text-[11px] opacity-90 leading-relaxed">
-                            Abbiamo spedito il codice a <strong>{forgotEmail}</strong>. Se non lo trovi in Posta in arrivo, controlla anche nella cartella <strong>Spam</strong> o Posta indesiderata.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-3.5 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/80 text-amber-900 dark:text-amber-100 text-xs rounded-2xl space-y-2">
-                        <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200">
-                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                          <span>Server email SMTP non configurato nell'hosting</span>
-                        </div>
-                        <p className="text-[11px] text-amber-800 dark:text-amber-300/90 leading-relaxed">
-                          L'ambiente di hosting (Render) richiede le variabili SMTP per inviare email esterne a Gmail/Outlook. Per questo motivo, abbiamo generato il tuo codice di sicurezza e lo abbiamo <strong>già inserito</strong> nel campo sottostante:
-                        </p>
-                        {devCodeTip && (
-                          <div className="flex items-center justify-between bg-white dark:bg-neutral-900 px-3.5 py-2 rounded-xl border border-amber-300/80 dark:border-amber-800">
-                            <div className="flex items-center gap-2">
-                              <KeyRound className="w-4 h-4 text-[#f23e2e]" />
-                              <span className="font-mono text-base font-black tracking-widest text-[#f23e2e]">{devCodeTip}</span>
-                            </div>
-                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
-                              ✓ Pronto per il reset
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </>
+                  <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs rounded-2xl flex items-start gap-2.5">
+                    <Mail className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <p className="font-bold">Controlla la tua casella di posta</p>
+                      <p className="text-[11px] opacity-90 leading-relaxed">
+                        Abbiamo inviato un codice a 6 cifre all&apos;indirizzo <strong>{forgotEmail}</strong>. Se non lo trovi in Posta in arrivo entro pochi istanti, controlla anche nella cartella <strong>Spam</strong> o Posta indesiderata.
+                      </p>
+                    </div>
+                  </div>
                 )}
 
                 {forgotStep === 'request' ? (
@@ -794,11 +757,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       {isForgotLoading ? (
                         <>
                           <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          <span>Invio codice in corso...</span>
+                          <span>Invio email in corso...</span>
                         </>
                       ) : (
                         <>
-                          <span>Invia codice di recupero</span>
+                          <span>Invia codice via email</span>
                           <ArrowRight className="w-4 h-4" />
                         </>
                       )}
@@ -821,7 +784,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   <form onSubmit={handleForgotResetSubmit} className="space-y-4">
                     <div>
                       <label className="block text-[11px] font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-1.5">
-                        Codice di Verifica a 6 cifre *
+                        Codice a 6 cifre ricevuto via email *
                       </label>
                       <input
                         type="text"
@@ -829,7 +792,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                         maxLength={6}
                         value={forgotCode}
                         onChange={(e) => setForgotCode(e.target.value.replace(/\D/g, ''))}
-                        placeholder="Es. 123456"
+                        placeholder="Inserisci il codice ricevuto per email"
                         className="w-full px-3.5 py-2.5 tracking-widest text-center bg-neutral-50 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white rounded-xl text-base font-bold focus:bg-white dark:focus:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#f23e2e] transition-all"
                       />
                     </div>
