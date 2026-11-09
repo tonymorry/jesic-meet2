@@ -658,33 +658,57 @@ async function sendPasswordResetEmail(cleanEmail: string, otpCode: string): Prom
   }
 
   try {
-    const resendFrom = process.env.RESEND_FROM?.trim() || 'JESic Meet <onboarding@resend.dev>';
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: resendFrom,
-        to: [cleanEmail],
-        subject,
-        html: htmlContent,
-        text: textContent,
-      }),
-    });
-
-    const data: any = await res.json().catch(() => ({}));
-    if (res.ok) {
-      console.log(`[Password Reset] Email inviata con successo via Resend a ${cleanEmail}`);
-      return { success: true };
+    let rawFrom = process.env.RESEND_FROM?.trim();
+    // Se non impostato o se contiene ancora il dominio di test resend.dev, usa il dominio verificato jesic.it
+    if (!rawFrom || rawFrom.includes('resend.dev')) {
+      rawFrom = 'JESic Meet <info@jesic.it>';
     }
 
-    const errorDetail = data?.message || data?.error || (typeof data === 'string' ? data : `Errore HTTP ${res.status}`);
-    console.warn(`[Password Reset] Risposta non OK da Resend:`, data);
+    // Lista di mittenti con il dominio verificato @jesic.it
+    const sendersToTry = [rawFrom];
+    if (!sendersToTry.includes('JESic Meet <info@jesic.it>')) {
+      sendersToTry.push('JESic Meet <info@jesic.it>');
+    }
+    if (!sendersToTry.includes('JESic Meet <noreply@jesic.it>')) {
+      sendersToTry.push('JESic Meet <noreply@jesic.it>');
+    }
+
+    let lastErrorDetail = '';
+    for (const sender of sendersToTry) {
+      console.log(`[Password Reset] Invio Resend con mittente: ${sender} a ${cleanEmail}...`);
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: sender,
+          to: [cleanEmail],
+          subject,
+          html: htmlContent,
+          text: textContent,
+        }),
+      });
+
+      const data: any = await res.json().catch(() => ({}));
+      if (res.ok) {
+        console.log(`[Password Reset] Email inviata con successo via Resend da ${sender} a ${cleanEmail}`);
+        return { success: true };
+      }
+
+      lastErrorDetail = data?.message || data?.error || (typeof data === 'string' ? data : `Errore HTTP ${res.status}`);
+      console.warn(`[Password Reset] Risposta non OK da Resend con mittente ${sender}:`, lastErrorDetail);
+
+      // Se l'errore non riguarda restrizioni sul mittente 'from' o sul dominio, interrompi il ciclo
+      if (!lastErrorDetail.toLowerCase().includes('from') && !lastErrorDetail.toLowerCase().includes('domain') && !lastErrorDetail.toLowerCase().includes('testing emails')) {
+        break;
+      }
+    }
+
     return {
       success: false,
-      error: `Resend non è riuscito a recapitare l'email: ${errorDetail}`,
+      error: `Resend non è riuscito a recapitare l'email: ${lastErrorDetail}`,
     };
   } catch (err: any) {
     console.error(`[Password Reset] Eccezione chiamata Resend:`, err.message);
