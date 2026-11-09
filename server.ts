@@ -19,8 +19,16 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
+import dns from 'dns';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
+
+// Forza la risoluzione IPv4 per evitare stalli/timeout IPv6 con provider SMTP e cloud
+try {
+  if (dns && typeof (dns as any).setDefaultResultOrder === 'function') {
+    (dns as any).setDefaultResultOrder('ipv4first');
+  }
+} catch (_) {}
 
 // Gestione WebSocket per aggiornamenti istantanei in tempo reale (Chat, Nuovi Membri, Presenza, Eventi, Ruoli)
 let wss: WebSocketServer | null = null;
@@ -625,6 +633,185 @@ app.post('/api/users/set-password', async (req: Request, res: Response) => {
 // Store in-memory temporaneo per i codici di verifica password (garantisce funzionamento continuo anche durante transizioni MongoDB)
 const inMemoryResetCodes = new Map<string, { code: string; expires: number }>();
 
+/**
+ * Helper per l'invio dell'email di recupero password:
+ * Canale 1: Resend API (HTTPS porta 443) -> bypassa il blocco porte 25/465/587 di Render Free
+ * Canale 2: Brevo API (HTTPS porta 443)  -> bypassa il blocco porte 25/465/587 di Render Free
+ * Canale 3: Nodemailer SMTP con fallback porte (465 SSL <-> 587 TLS), rimozione automatica spazi da App Password e IPv4 forzato
+ */
+async function sendPasswordResetEmail(cleanEmail: string, otpCode: string): Promise<{ success: boolean; error?: string; provider?: string }> {
+  const subject = 'Codice di recupero password - JESic Meet';
+  const textContent = `Il tuo codice di verifica per recuperare la password di JESic Meet è: ${otpCode}. Il codice scade tra 15 minuti. Inseriscilo nell'applicazione per impostare una nuova password.`;
+  const htmlContent = `
+    <div style="font-family: 'Ubuntu', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 16px; background-color: #ffffff;">
+      <div style="display: flex; align-items: center; margin-bottom: 16px;">
+        <h2 style="color: #1e1e1e; margin: 0; font-size: 24px;">JESic<span style="color: #f23e2e;">Meet</span></h2>
+      </div>
+      <h3 style="color: #1e1e1e; margin-bottom: 8px;">Recupero Password</h3>
+      <p style="color: #4b5563; font-size: 14px; line-height: 1.5;">Hai richiesto il ripristino della tua password per accedere alla piattaforma <strong>JESic Meet</strong>.</p>
+      <p style="color: #4b5563; font-size: 14px;">Utilizza il seguente codice di sicurezza temporaneo:</p>
+      <div style="text-align: center; margin: 24px 0;">
+        <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #f23e2e; background-color: #fef2f2; padding: 12px 24px; border-radius: 12px; border: 1px solid #fecaca; display: inline-block;">${otpCode}</span>
+      </div>
+      <p style="color: #6b7280; font-size: 12px; line-height: 1.4;">Il codice scadrà tra 15 minuti. Se non sei stato tu a richiedere il ripristino, ignora questa comunicazione.</p>
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
+      <p style="color: #9ca3af; font-size: 11px; text-align: center;">Junior Enterprise Sicilia (JESic) • info@jesic.it</p>
+    </div>
+  `;
+
+  // CANALE 1: Resend API (HTTPS porta 443 - zero blocchi di rete su Render)
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  if (resendApiKey) {
+    try {
+      const resendFrom = process.env.RESEND_FROM?.trim() || 'JESic Meet <onboarding@resend.dev>';
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: resendFrom,
+          to: [cleanEmail],
+          subject,
+          html: htmlContent,
+          text: textContent,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        console.log(`[Password Reset] Email inviata con successo via Resend API (porta 443 HTTPS) a ${cleanEmail}`);
+        return { success: true, provider: 'Resend API' };
+      }
+      console.warn(`[Password Reset] Risposta non OK da Resend API:`, data);
+    } catch (resendErr: any) {
+      console.warn(`[Password Reset] Errore chiamata Resend API:`, resendErr.message);
+    }
+  }
+
+  // CANALE 2: Brevo API (HTTPS porta 443)
+  const brevoApiKey = process.env.BREVO_API_KEY?.trim();
+  if (brevoApiKey) {
+    try {
+      const brevoFrom = process.env.BREVO_FROM?.trim() || 'info@jesic.it';
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': brevoApiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: 'JESic Meet', email: brevoFrom },
+          to: [{ email: cleanEmail }],
+          subject,
+          htmlContent,
+          textContent,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        console.log(`[Password Reset] Email inviata con successo via Brevo API (porta 443 HTTPS) a ${cleanEmail}`);
+        return { success: true, provider: 'Brevo API' };
+      }
+      console.warn(`[Password Reset] Risposta non OK da Brevo API:`, data);
+    } catch (brevoErr: any) {
+      console.warn(`[Password Reset] Errore chiamata Brevo API:`, brevoErr.message);
+    }
+  }
+
+  // CANALE 3: SMTP Standard con Nodemailer
+  const smtpUser = process.env.SMTP_USER?.trim();
+  // Rimuoviamo gli spazi vuoti che gli utenti spesso copiano dalle "Password per le app" di Google (formato: "xxxx xxxx xxxx xxxx")
+  const rawPass = process.env.SMTP_PASS?.trim() || '';
+  const smtpPass = rawPass.replace(/\s+/g, '');
+  const smtpHost = process.env.SMTP_HOST?.trim();
+
+  const hasSmtpConfig = Boolean(smtpUser && smtpPass);
+  if (!hasSmtpConfig && !resendApiKey && !brevoApiKey) {
+    return {
+      success: false,
+      error: "Nessun servizio email configurato nel file .env o nelle variabili d'ambiente di hosting. Imposta RESEND_API_KEY (consigliato per Render, invia via HTTPS porta 443) oppure SMTP_USER e SMTP_PASS.",
+    };
+  }
+
+  if (hasSmtpConfig) {
+    const isGmail = (!smtpHost || smtpHost.includes('gmail')) && (Boolean(smtpUser?.includes('@gmail.com')) || process.env.SMTP_SERVICE === 'gmail');
+    const fromAddress = process.env.SMTP_FROM || `"JESic Meet" <${smtpUser || 'info@jesic.it'}>`;
+
+    // Tentativo con configurazioni multiple (porta 465 SSL vs porta 587 STARTTLS) per aggirare blocchi singoli
+    const attempts = [];
+    if (isGmail) {
+      attempts.push({ name: 'Gmail SSL (porta 465)', host: 'smtp.gmail.com', port: 465, secure: true });
+      attempts.push({ name: 'Gmail TLS (porta 587)', host: 'smtp.gmail.com', port: 587, secure: false });
+    } else {
+      const configuredPort = Number(process.env.SMTP_PORT) || 587;
+      const configuredSecure = process.env.SMTP_SECURE === 'true' || configuredPort === 465;
+      attempts.push({ name: `SMTP configurato (${smtpHost}:${configuredPort})`, host: smtpHost || 'smtp.gmail.com', port: configuredPort, secure: configuredSecure });
+      if (configuredPort === 465) {
+        attempts.push({ name: `SMTP fallback STARTTLS (${smtpHost}:587)`, host: smtpHost || 'smtp.gmail.com', port: 587, secure: false });
+      } else if (configuredPort === 587) {
+        attempts.push({ name: `SMTP fallback SSL (${smtpHost}:465)`, host: smtpHost || 'smtp.gmail.com', port: 465, secure: true });
+      }
+    }
+
+    let lastSmtpError = '';
+    for (const attempt of attempts) {
+      try {
+        console.log(`[Password Reset] Tentativo invio SMTP via ${attempt.name}...`);
+        const transporter = (nodemailer.createTransport as any)({
+          host: attempt.host,
+          port: attempt.port,
+          secure: attempt.secure,
+          auth: {
+            user: smtpUser,
+            pass: smtpPass,
+          },
+          family: 4, // Forza protocollo IPv4 per evitare stalli e timeout DNS IPv6
+          connectionTimeout: 5000,
+          greetingTimeout: 4000,
+          socketTimeout: 6000,
+          tls: {
+            rejectUnauthorized: false,
+          },
+        });
+
+        await transporter.sendMail({
+          from: fromAddress,
+          to: cleanEmail,
+          subject,
+          text: textContent,
+          html: htmlContent,
+        });
+
+        console.log(`[Password Reset] Email inviata con successo via ${attempt.name} a ${cleanEmail}`);
+        return { success: true, provider: attempt.name };
+      } catch (err: any) {
+        lastSmtpError = err.message || String(err);
+        console.warn(`[Password Reset] Tentativo con ${attempt.name} fallito: ${lastSmtpError}`);
+      }
+    }
+
+    // Se tutti i tentativi SMTP sono falliti per Connection timeout
+    const isTimeout = lastSmtpError.toLowerCase().includes('timeout') || lastSmtpError.toLowerCase().includes('etimedout') || lastSmtpError.toLowerCase().includes('econnrefused');
+    if (isTimeout) {
+      return {
+        success: false,
+        error: "Timeout di connessione SMTP. Render blocca le porte in uscita 25, 465 e 587 nei servizi gratuiti per policy anti-spam. Per inviare email reali senza blocchi da Render, aggiungi la variabile gratuita RESEND_API_KEY nel pannello 'Environment' di Render (invia su porta 443 HTTPS), oppure verifica che la Password per le app di Google non abbia restrizioni.",
+      };
+    }
+
+    return {
+      success: false,
+      error: `Errore SMTP: ${lastSmtpError}. Verifica che l'account Google abbia la 'Password per le app' attiva a 16 caratteri.`,
+    };
+  }
+
+  return {
+    success: false,
+    error: "Impossibile inviare l'email. Configura RESEND_API_KEY oppure SMTP_USER e SMTP_PASS.",
+  };
+}
+
 // POST /api/auth/forgot-password - Invio codice OTP a 6 cifre per recupero password
 app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
   try {
@@ -642,13 +829,11 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
     inMemoryResetCodes.set(cleanEmail, { code: otpCode, expires: expiresAt });
 
     // Salva anche nel database MongoDB se disponibile (con timeout rigido di 2 secondi per evitare blocchi)
-    let userFoundInDb = false;
     if (mongoose.connection.readyState === 1) {
       try {
         const dbPromise = (async () => {
           const user = await UserModel.findOne({ email: cleanEmail });
           if (user) {
-            userFoundInDb = true;
             user.resetPasswordCode = otpCode;
             user.resetPasswordExpires = new Date(expiresAt);
             await user.save();
@@ -667,96 +852,13 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
 
     console.log(`[Password Reset OTP] Codice generato per ${cleanEmail}: ${otpCode}`);
 
-    // Tentativo di invio email reale con nodemailer
-    let emailSent = false;
-    let mailError: string | null = null;
-    const smtpUser = process.env.SMTP_USER?.trim();
-    const smtpPass = process.env.SMTP_PASS?.trim();
-    const smtpHost = process.env.SMTP_HOST?.trim();
-    const hasSmtpConfig = Boolean((smtpUser && smtpPass) || smtpHost);
+    // Tentativo di recapito email reale
+    const sendResult = await sendPasswordResetEmail(cleanEmail, otpCode);
 
-    if (hasSmtpConfig) {
-      try {
-        const port = Number(process.env.SMTP_PORT) || 587;
-        const secure = process.env.SMTP_SECURE === 'true' || port === 465;
-        const isGmail = (!smtpHost || smtpHost.includes('gmail')) && (smtpUser?.includes('@gmail.com') || process.env.SMTP_SERVICE === 'gmail');
-
-        let transporter: any;
-        if (isGmail && smtpUser && smtpPass) {
-          // Modalità dedicata Gmail (gestisce host, port e TLS automaticamente)
-          transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-              user: smtpUser,
-              pass: smtpPass,
-            },
-            connectionTimeout: 8000,
-            greetingTimeout: 5000,
-            socketTimeout: 10000,
-          });
-        } else {
-          transporter = nodemailer.createTransport({
-            host: smtpHost || 'smtp.gmail.com',
-            port,
-            secure,
-            auth: smtpUser ? {
-              user: smtpUser,
-              pass: smtpPass,
-            } : undefined,
-            connectionTimeout: 8000,
-            greetingTimeout: 5000,
-            socketTimeout: 10000,
-            tls: {
-              rejectUnauthorized: false,
-            },
-          });
-        }
-
-        const fromAddress = process.env.SMTP_FROM || `"JESic Meet" <${smtpUser || 'info@jesic.it'}>`;
-
-        await transporter.sendMail({
-          from: fromAddress,
-          to: cleanEmail,
-          subject: 'Codice di recupero password - JESic Meet',
-          text: `Il tuo codice di verifica per recuperare la password di JESic Meet è: ${otpCode}. Il codice scade tra 15 minuti. Inseriscilo nell'applicazione per impostare una nuova password.`,
-          html: `
-            <div style="font-family: 'Ubuntu', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 16px; background-color: #ffffff;">
-              <div style="display: flex; align-items: center; margin-bottom: 16px;">
-                <h2 style="color: #1e1e1e; margin: 0;">JESic<span style="color: #f23e2e;">Meet</span></h2>
-              </div>
-              <h3 style="color: #1e1e1e; margin-bottom: 8px;">Recupero Password</h3>
-              <p style="color: #4b5563; font-size: 14px; line-height: 1.5;">Hai richiesto il ripristino della tua password per accedere alla piattaforma <strong>JESic Meet</strong>.</p>
-              <p style="color: #4b5563; font-size: 14px;">Utilizza il seguente codice di sicurezza temporaneo:</p>
-              <div style="text-align: center; margin: 24px 0;">
-                <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #f23e2e; background-color: #fef2f2; padding: 12px 24px; border-radius: 12px; border: 1px solid #fecaca; display: inline-block;">${otpCode}</span>
-              </div>
-              <p style="color: #6b7280; font-size: 12px; line-height: 1.4;">Il codice scadrà tra 15 minuti. Se non sei stato tu a richiedere il ripristino, ignora questa comunicazione.</p>
-              <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
-              <p style="color: #9ca3af; font-size: 11px; text-align: center;">Junior Enterprise Sicilia (JESic) • info@jesic.it</p>
-            </div>
-          `,
-        });
-
-        emailSent = true;
-        console.log(`[Password Reset] Email inviata con successo via SMTP a ${cleanEmail}`);
-      } catch (err: any) {
-        mailError = err.message || String(err);
-        console.warn(`[Password Reset] Invio email non riuscito (${mailError})`);
-      }
-    } else {
-      console.log(`[Password Reset] Nessuna credenziale SMTP trovata in process.env (SMTP_USER / SMTP_PASS mancanti).`);
-    }
-
-    if (!emailSent) {
-      if (!hasSmtpConfig) {
-        return res.status(503).json({
-          success: false,
-          error: "Il servizio di invio email non è configurato sul server. È necessario impostare le credenziali SMTP (SMTP_USER e SMTP_PASS) nelle variabili d'ambiente di hosting per consentire l'invio dell'email con il codice.",
-        });
-      }
+    if (!sendResult.success) {
       return res.status(500).json({
         success: false,
-        error: `Impossibile recapitare l'email a ${cleanEmail}: ${mailError || 'errore del server di posta'}. Verifica la configurazione SMTP.`,
+        error: `Impossibile recapitare l'email a ${cleanEmail}: ${sendResult.error || 'errore del server'}.`,
       });
     }
 
