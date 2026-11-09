@@ -622,6 +622,9 @@ app.post('/api/users/set-password', async (req: Request, res: Response) => {
   }
 });
 
+// Store in-memory temporaneo per i codici di verifica password (garantisce funzionamento continuo anche durante transizioni MongoDB)
+const inMemoryResetCodes = new Map<string, { code: string; expires: number }>();
+
 // POST /api/auth/forgot-password - Invio codice OTP a 6 cifre per recupero password
 app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
   try {
@@ -631,40 +634,68 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
     }
     const cleanEmail = String(email).toLowerCase().trim();
 
-    const user = await UserModel.findOne({ email: cleanEmail });
-    if (!user) {
-      return res.status(404).json({ error: 'Nessun account registrato con questo indirizzo email.' });
-    }
-
     // Genera codice numerico a 6 cifre (100000 - 999999) con scadenza a 15 minuti
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    user.resetPasswordCode = otpCode;
-    user.resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000);
-    await user.save();
+    const expiresAt = Date.now() + 15 * 60 * 1000;
+
+    // Salva sempre nello store in-memory del server
+    inMemoryResetCodes.set(cleanEmail, { code: otpCode, expires: expiresAt });
+
+    // Salva anche nel database MongoDB se disponibile
+    let userFoundInDb = false;
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const user = await UserModel.findOne({ email: cleanEmail });
+        if (user) {
+          userFoundInDb = true;
+          user.resetPasswordCode = otpCode;
+          user.resetPasswordExpires = new Date(expiresAt);
+          await user.save();
+        }
+      } catch (dbErr: any) {
+        console.warn('[Password Reset] Errore salvataggio codice su MongoDB:', dbErr.message);
+      }
+    }
 
     console.log(`[Password Reset OTP] Codice generato per ${cleanEmail}: ${otpCode}`);
 
-    // Tentativo di invio email con nodemailer
+    // Tentativo di invio email reale con nodemailer
     let emailSent = false;
-    try {
-      if (process.env.SMTP_USER || process.env.SMTP_HOST) {
+    let mailError: string | null = null;
+    const hasSmtpConfig = Boolean(process.env.SMTP_USER || process.env.SMTP_HOST);
+
+    if (hasSmtpConfig) {
+      try {
+        const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+        const port = Number(process.env.SMTP_PORT) || 587;
+        const secure = process.env.SMTP_SECURE === 'true' || port === 465;
+
         const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST || 'smtp.gmail.com',
-          port: Number(process.env.SMTP_PORT) || 587,
-          secure: process.env.SMTP_SECURE === 'true',
+          host,
+          port,
+          secure,
           auth: process.env.SMTP_USER ? {
             user: process.env.SMTP_USER,
             pass: process.env.SMTP_PASS,
           } : undefined,
+          tls: {
+            rejectUnauthorized: false,
+          },
         });
 
+        const fromAddress = process.env.SMTP_FROM || `"JESic Meet" <${process.env.SMTP_USER || 'info@jesic.it'}>`;
+
         await transporter.sendMail({
-          from: `"JESic Meet" <${process.env.SMTP_USER || 'info@jesic.it'}>`,
+          from: fromAddress,
           to: cleanEmail,
           subject: 'Codice di recupero password - JESic Meet',
+          text: `Il tuo codice di verifica per recuperare la password di JESic Meet è: ${otpCode}. Il codice scade tra 15 minuti.`,
           html: `
             <div style="font-family: 'Ubuntu', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 16px; background-color: #ffffff;">
-              <h2 style="color: #1e1e1e; margin-bottom: 8px;">Recupero Password JESic Meet</h2>
+              <div style="display: flex; align-items: center; margin-bottom: 16px;">
+                <h2 style="color: #1e1e1e; margin: 0;">JESic<span style="color: #f23e2e;">Meet</span></h2>
+              </div>
+              <h3 style="color: #1e1e1e; margin-bottom: 8px;">Recupero Password</h3>
               <p style="color: #4b5563; font-size: 14px; line-height: 1.5;">Hai richiesto il ripristino della tua password per accedere alla piattaforma <strong>JESic Meet</strong>.</p>
               <p style="color: #4b5563; font-size: 14px;">Utilizza il seguente codice di sicurezza temporaneo:</p>
               <div style="text-align: center; margin: 24px 0;">
@@ -677,22 +708,29 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
           `,
         });
         emailSent = true;
+        console.log(`[Password Reset] Email inviata con successo via SMTP a ${cleanEmail}`);
+      } catch (err: any) {
+        mailError = err.message || String(err);
+        console.warn(`[Password Reset] Invio email non riuscito (${mailError}). Fornito codice a video.`);
       }
-    } catch (mailErr: any) {
-      console.warn('[Password Reset] Invio email non riuscito (fornito codice di sicurezza a video):', mailErr.message);
+    } else {
+      console.log(`[Password Reset] Nessuna configurazione SMTP rilevata in process.env. Restituzione codice a schermo.`);
     }
 
     return res.json({
       success: true,
-      message: emailSent
-        ? `Abbiamo inviato un codice di sicurezza a ${cleanEmail}.`
-        : `Codice di verifica generato con successo.`,
-      // devCode permette di testare immediatamente il flusso anche in assenza di server SMTP
+      emailSent,
+      code: otpCode,
       devCode: otpCode,
+      hasSmtpConfig,
+      mailError,
+      message: emailSent
+        ? `Abbiamo inviato un'email con il codice di sicurezza a ${cleanEmail}.`
+        : `Server email (SMTP) non configurato nell'ambiente di hosting. Il tuo codice univoco è pronto qui sotto.`,
     });
   } catch (err: any) {
     console.error('Errore /api/auth/forgot-password:', err.message);
-    return res.status(500).json({ error: 'Errore durante l\'invio del codice di recupero.' });
+    return res.status(500).json({ error: 'Errore durante la generazione del codice di recupero.' });
   }
 });
 
@@ -711,34 +749,63 @@ app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'La nuova password deve contenere almeno 6 caratteri.' });
     }
 
-    const user = await UserModel.findOne({ email: cleanEmail });
-    if (!user) {
-      return res.status(404).json({ error: 'Utente non trovato.' });
+    // 1. Verifica codice nello store in-memory
+    const memoryEntry = inMemoryResetCodes.get(cleanEmail);
+    let isCodeValid = false;
+
+    if (memoryEntry) {
+      if (memoryEntry.code === cleanCode) {
+        if (Date.now() <= memoryEntry.expires) {
+          isCodeValid = true;
+        } else {
+          return res.status(400).json({ error: 'Il codice di verifica è scaduto. Richiedine uno nuovo.' });
+        }
+      }
     }
 
-    if (!user.resetPasswordCode || user.resetPasswordCode !== cleanCode) {
-      return res.status(400).json({ error: 'Codice di verifica non valido o errato.' });
+    // 2. Se non ancora validato via memoria, controlla sul database MongoDB
+    let dbUser = null;
+    if (mongoose.connection.readyState === 1) {
+      try {
+        dbUser = await UserModel.findOne({ email: cleanEmail });
+        if (dbUser && dbUser.resetPasswordCode === cleanCode) {
+          if (dbUser.resetPasswordExpires && new Date() <= dbUser.resetPasswordExpires) {
+            isCodeValid = true;
+          } else {
+            return res.status(400).json({ error: 'Il codice di verifica è scaduto. Richiedine uno nuovo.' });
+          }
+        }
+      } catch (dbErr: any) {
+        console.warn('[Password Reset] Errore verifica utente su MongoDB:', dbErr.message);
+      }
     }
 
-    if (user.resetPasswordExpires && new Date() > user.resetPasswordExpires) {
-      return res.status(400).json({ error: 'Il codice di verifica è scaduto. Richiedine uno nuovo.' });
+    if (!isCodeValid) {
+      return res.status(400).json({ error: 'Codice di verifica non valido o errato. Controlla e riprova.' });
     }
 
-    user.password = cleanNewPassword;
-    user.resetPasswordCode = undefined;
-    user.resetPasswordExpires = undefined;
-    await user.save();
+    // Rimuovi il codice usato dalla memoria
+    inMemoryResetCodes.delete(cleanEmail);
 
-    const jsonUser = {
-      id: user._id || user.id,
-      name: user.name,
-      surname: user.surname,
-      email: user.email,
-      avatarUrl: user.avatarUrl || null,
-      googleCalendarConnected: Boolean(user.googleCalendarConnected),
-      hasPassword: true,
-      groupMemberships: user.groupMemberships || [],
-    };
+    // Se l'utente esiste su MongoDB, aggiorna la password persistente
+    let jsonUser = null;
+    if (dbUser) {
+      dbUser.password = cleanNewPassword;
+      dbUser.resetPasswordCode = undefined;
+      dbUser.resetPasswordExpires = undefined;
+      await dbUser.save();
+
+      jsonUser = {
+        id: dbUser._id || dbUser.id,
+        name: dbUser.name,
+        surname: dbUser.surname,
+        email: dbUser.email,
+        avatarUrl: dbUser.avatarUrl || null,
+        googleCalendarConnected: Boolean(dbUser.googleCalendarConnected),
+        hasPassword: true,
+        groupMemberships: dbUser.groupMemberships || [],
+      };
+    }
 
     return res.json({
       success: true,

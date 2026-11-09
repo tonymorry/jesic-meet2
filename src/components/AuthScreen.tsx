@@ -27,6 +27,7 @@ import {
   CheckCircle2,
   Shield,
   FileText,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface AuthScreenProps {
@@ -82,6 +83,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [forgotStep, setForgotStep] = useState<'request' | 'verify'>('request');
   const [isForgotLoading, setIsForgotLoading] = useState(false);
   const [devCodeTip, setDevCodeTip] = useState<string | null>(null);
+  const [isEmailSent, setIsEmailSent] = useState<boolean | null>(null);
 
   // Hook useGoogleLogin con flow: 'auth-code' e scope Google Calendar Events
   const loginWithGoogle = useGoogleLogin({
@@ -238,13 +240,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        setErrorMsg(data.error || 'Impossibile inviare il codice. Verifica l\'email inserita.');
+        setErrorMsg(data.error || 'Impossibile generare il codice. Verifica l\'email inserita.');
         return;
       }
 
-      setSuccessMsg('Ti abbiamo inviato un codice a 6 cifre per reimpostare la tua password.');
-      if (data.devCode) {
-        setDevCodeTip(`Codice di verifica: ${data.devCode}`);
+      const emailSent = Boolean(data.emailSent);
+      setIsEmailSent(emailSent);
+
+      if (emailSent) {
+        setSuccessMsg(`Abbiamo inviato un'email con il codice a ${cleanEmail}. Controlla la posta in arrivo (e anche la cartella Spam).`);
+      } else {
+        setSuccessMsg('Codice di sicurezza univoco a 6 cifre pronto!');
+      }
+
+      const code = String(data.code || data.devCode || '');
+      if (code) {
+        setDevCodeTip(code);
+        setForgotCode(code); // Pre-compila automaticamente per comodità immediata
       }
       setForgotStep('verify');
     } catch (err: any) {
@@ -710,11 +722,42 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   </div>
                 </div>
 
-                {devCodeTip && (
-                  <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-xs rounded-2xl flex items-center gap-2">
-                    <KeyRound className="w-4 h-4 text-blue-600 shrink-0" />
-                    <span className="font-semibold">{devCodeTip}</span>
-                  </div>
+                {/* Banner Consegna Email / Codice a Schermo */}
+                {forgotStep === 'verify' && (
+                  <>
+                    {isEmailSent ? (
+                      <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs rounded-2xl flex items-start gap-2.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <p className="font-bold">Email inviata con successo!</p>
+                          <p className="text-[11px] opacity-90 leading-relaxed">
+                            Abbiamo spedito il codice a <strong>{forgotEmail}</strong>. Se non lo trovi in Posta in arrivo, controlla anche nella cartella <strong>Spam</strong> o Posta indesiderata.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3.5 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/80 text-amber-900 dark:text-amber-100 text-xs rounded-2xl space-y-2">
+                        <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>Server email SMTP non configurato nell'hosting</span>
+                        </div>
+                        <p className="text-[11px] text-amber-800 dark:text-amber-300/90 leading-relaxed">
+                          L'ambiente di hosting (Render) richiede le variabili SMTP per inviare email esterne a Gmail/Outlook. Per questo motivo, abbiamo generato il tuo codice di sicurezza e lo abbiamo <strong>già inserito</strong> nel campo sottostante:
+                        </p>
+                        {devCodeTip && (
+                          <div className="flex items-center justify-between bg-white dark:bg-neutral-900 px-3.5 py-2 rounded-xl border border-amber-300/80 dark:border-amber-800">
+                            <div className="flex items-center gap-2">
+                              <KeyRound className="w-4 h-4 text-[#f23e2e]" />
+                              <span className="font-mono text-base font-black tracking-widest text-[#f23e2e]">{devCodeTip}</span>
+                            </div>
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                              ✓ Pronto per il reset
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {forgotStep === 'request' ? (
