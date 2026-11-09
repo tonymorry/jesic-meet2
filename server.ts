@@ -659,19 +659,21 @@ async function sendPasswordResetEmail(cleanEmail: string, otpCode: string): Prom
 
   try {
     let rawFrom = process.env.RESEND_FROM?.trim();
-    // Se non impostato o se contiene ancora il dominio di test resend.dev, usa il dominio verificato jesic.it
+    // Se non impostato o se contiene ancora il dominio di test resend.dev, usa il dominio verificato jesicmeet.it
     if (!rawFrom || rawFrom.includes('resend.dev')) {
-      rawFrom = 'JESic Meet <info@jesic.it>';
+      rawFrom = 'JESic Meet <info@jesicmeet.it>';
     }
 
-    // Lista di mittenti con il dominio verificato @jesic.it
-    const sendersToTry = [rawFrom];
-    if (!sendersToTry.includes('JESic Meet <info@jesic.it>')) {
-      sendersToTry.push('JESic Meet <info@jesic.it>');
-    }
-    if (!sendersToTry.includes('JESic Meet <noreply@jesic.it>')) {
-      sendersToTry.push('JESic Meet <noreply@jesic.it>');
-    }
+    // Lista di mittenti ordinata con priorità al dominio verificato @jesicmeet.it
+    const sendersToTry: string[] = [];
+    const addSender = (s: string) => {
+      if (!sendersToTry.includes(s)) sendersToTry.push(s);
+    };
+
+    addSender(rawFrom);
+    addSender('JESic Meet <info@jesicmeet.it>');
+    addSender('JESic Meet <noreply@jesicmeet.it>');
+    addSender('JESic Meet <info@jesic.it>');
 
     let lastErrorDetail = '';
     for (const sender of sendersToTry) {
