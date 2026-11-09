@@ -34,6 +34,9 @@ export interface IUser {
   cognome?: string;
   email: string;
   password?: string;
+  hasPassword?: boolean;
+  resetPasswordCode?: string | null;
+  resetPasswordExpires?: Date | null;
   groupMemberships: IUserGroupMembership[];
   avatarUrl?: string | null;
   googleAccessToken?: string;
@@ -90,6 +93,14 @@ const UserSchema: Schema<IUser> = new Schema(
     password: {
       type: String,
       default: '',
+    },
+    resetPasswordCode: {
+      type: String,
+      default: null,
+    },
+    resetPasswordExpires: {
+      type: Date,
+      default: null,
     },
     groupMemberships: {
       type: [UserGroupMembershipSchema],

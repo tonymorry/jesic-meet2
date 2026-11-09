@@ -16,6 +16,7 @@ import {
   LogIn,
   Mail,
   ArrowRight,
+  ArrowLeft,
   Lock,
   Eye,
   EyeOff,
@@ -49,7 +50,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   onOpenPrivacy,
   onOpenTerms,
 }) => {
-  const [mode, setMode] = useState<'login' | 'register'>(
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>(
     registeredUsers.length === 0 ? 'register' : 'login'
   );
 
@@ -68,7 +69,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+
+  // Form Password Dimenticata (Email -> OTP -> Nuova Password)
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotCode, setForgotCode] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+  const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
+  const [forgotStep, setForgotStep] = useState<'request' | 'verify'>('request');
+  const [isForgotLoading, setIsForgotLoading] = useState(false);
+  const [devCodeTip, setDevCodeTip] = useState<string | null>(null);
 
   // Hook useGoogleLogin con flow: 'auth-code' e scope Google Calendar Events
   const loginWithGoogle = useGoogleLogin({
@@ -77,6 +90,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     onSuccess: async (codeResponse) => {
       if (codeResponse.code) {
         setErrorMsg(null);
+        setSuccessMsg(null);
         setIsGoogleLoading(true);
         try {
           if (onGoogleAuthCode) {
@@ -100,6 +114,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const handleRegisterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setSuccessMsg(null);
 
     if (!nome.trim() || !cognome.trim() || !email.trim() || !password) {
       setErrorMsg('Compila tutti i campi obbligatori contrassegnati con *.');
@@ -140,13 +155,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     });
   };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setSuccessMsg(null);
 
     const cleanEmail = loginEmail.trim().toLowerCase();
     if (!cleanEmail) {
-      setErrorMsg('Inserisci la tua email istituzionale.');
+      setErrorMsg('Inserisci la tua email personale o istituzionale.');
       return;
     }
 
@@ -155,20 +171,144 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    const match = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (!match) {
+    setIsLoggingIn(true);
+    try {
+      // Chiamata all'API di autenticazione sul server MongoDB
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password: loginPassword }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && data.user) {
+        onLogin(data.user);
+        return;
+      }
+
+      if (data.error) {
+        setErrorMsg(data.error);
+        return;
+      }
+
+      // Fallback locale nel caso di memoria client
+      const match = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
+      if (match) {
+        if (match.password && match.password !== loginPassword) {
+          setErrorMsg('Password non corretta. Riprova o clicca su (password dimenticata).');
+          return;
+        }
+        onLogin(match);
+        return;
+      }
+
       setErrorMsg('Nessun profilo trovato con questa email. Crea un nuovo account.');
+    } catch (err: any) {
+      // Fallback offline
+      const match = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
+      if (match && (!match.password || match.password === loginPassword)) {
+        onLogin(match);
+        return;
+      }
+      setErrorMsg('Errore di connessione o credenziali non corrette.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  // 1. Invio codice per password dimenticata
+  const handleForgotRequestSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setDevCodeTip(null);
+
+    const cleanEmail = forgotEmail.trim().toLowerCase();
+    if (!cleanEmail) {
+      setErrorMsg('Inserisci l\'indirizzo email del tuo account.');
       return;
     }
 
-    // Verifica password (se l'utente ha impostato una password, deve coincidere)
-    if (match.password && match.password !== loginPassword) {
-      setErrorMsg('Password non corretta. Riprova o verifica le maiuscole/minuscole.');
+    setIsForgotLoading(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.error || 'Impossibile inviare il codice. Verifica l\'email inserita.');
+        return;
+      }
+
+      setSuccessMsg('Ti abbiamo inviato un codice a 6 cifre per reimpostare la tua password.');
+      if (data.devCode) {
+        setDevCodeTip(`Codice di verifica: ${data.devCode}`);
+      }
+      setForgotStep('verify');
+    } catch (err: any) {
+      setErrorMsg('Errore di connessione durante la richiesta del codice. Riprova.');
+    } finally {
+      setIsForgotLoading(false);
+    }
+  };
+
+  // 2. Conferma OTP e impostazione nuova password
+  const handleForgotResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const cleanEmail = forgotEmail.trim().toLowerCase();
+    const cleanCode = forgotCode.trim();
+    const cleanPass = forgotNewPassword.trim();
+
+    if (!cleanCode || cleanCode.length < 6) {
+      setErrorMsg('Inserisci il codice numerico a 6 cifre ricevuto via email.');
       return;
     }
 
-    // Accesso solo e unicamente al proprio profilo
-    onLogin(match);
+    if (!cleanPass || cleanPass.length < 6) {
+      setErrorMsg('La nuova password deve contenere almeno 6 caratteri.');
+      return;
+    }
+
+    if (cleanPass !== forgotConfirmPassword.trim()) {
+      setErrorMsg('Le due password inserite non coincidono. Riprova.');
+      return;
+    }
+
+    setIsForgotLoading(true);
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          code: cleanCode,
+          newPassword: cleanPass,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.error || 'Codice non valido o scaduto. Riprova.');
+        return;
+      }
+
+      setSuccessMsg('Password reimpostata con successo! Inserisci la nuova password per accedere.');
+      setLoginEmail(cleanEmail);
+      setLoginPassword(cleanPass);
+      setForgotStep('request');
+      setForgotCode('');
+      setForgotNewPassword('');
+      setForgotConfirmPassword('');
+      setMode('login');
+    } catch (err: any) {
+      setErrorMsg('Errore di rete durante la reimpostazione della password.');
+    } finally {
+      setIsForgotLoading(false);
+    }
   };
 
   return (
@@ -359,6 +499,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </div>
             )}
 
+            {/* Messaggio Successo */}
+            {successMsg && (
+              <div className="bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-200 text-xs px-4 py-3 rounded-2xl font-medium mb-4 animate-in fade-in flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{successMsg}</span>
+              </div>
+            )}
+
             {/* Bottone Custom Google OAuth2 con useGoogleLogin (flow: auth-code & scope Calendar) */}
             <div className="mb-5 flex flex-col items-center">
               <div className="w-full">
@@ -366,6 +514,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   type="button"
                   onClick={() => {
                     setErrorMsg(null);
+                    setSuccessMsg(null);
                     setIsGoogleLoading(true);
                     loginWithGoogle();
                   }}
@@ -472,6 +621,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       )}
                     </button>
                   </div>
+                  {/* Link Password Dimenticata sotto la barra per inserire la password */}
+                  <div className="flex justify-end pt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotEmail(loginEmail || '');
+                        setForgotStep('request');
+                        setErrorMsg(null);
+                        setSuccessMsg(null);
+                        setDevCodeTip(null);
+                        setMode('forgot');
+                      }}
+                      className="text-[11px] font-bold text-[#f23e2e] hover:underline cursor-pointer transition-colors"
+                    >
+                      (password dimenticata)
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 rounded-2xl border border-neutral-100 dark:border-neutral-700/80 flex items-start gap-2 text-xs text-neutral-500 dark:text-neutral-400">
@@ -483,10 +649,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
                 <button
                   type="submit"
-                  className="w-full py-3 bg-[#f23e2e] hover:bg-red-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-red-600/25 transition-all flex items-center justify-center gap-1.5 active:scale-98 cursor-pointer"
+                  disabled={isLoggingIn}
+                  className="w-full py-3 bg-[#f23e2e] hover:bg-red-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-red-600/25 transition-all flex items-center justify-center gap-1.5 active:scale-98 cursor-pointer disabled:opacity-60"
                 >
-                  <span>Accedi al mio account</span>
-                  <ArrowRight className="w-4 h-4" />
+                  {isLoggingIn ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Verifica credenziali...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Accedi al mio account</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
 
                 <div className="pt-2 text-center">
@@ -495,6 +671,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     onClick={() => {
                       setMode('register');
                       setErrorMsg(null);
+                      setSuccessMsg(null);
                     }}
                     className="text-xs font-semibold text-[#f23e2e] hover:underline cursor-pointer"
                   >
@@ -502,6 +679,202 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   </button>
                 </div>
               </form>
+            )}
+
+            {/* 3. CORPO: PROCEDIMENTO RECUPERO PASSWORD (password dimenticata) */}
+            {mode === 'forgot' && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 pb-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setErrorMsg(null);
+                      setSuccessMsg(null);
+                      setDevCodeTip(null);
+                    }}
+                    className="p-1.5 rounded-lg text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                    title="Torna ad Accedi"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+                  <div>
+                    <h2 className="text-xl font-extrabold text-neutral-900 dark:text-white tracking-tight">
+                      Recupero Password
+                    </h2>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                      {forgotStep === 'request'
+                        ? 'Inserisci la tua email per ricevere il codice di sicurezza.'
+                        : 'Inserisci il codice ricevuto e scegli la nuova password.'}
+                    </p>
+                  </div>
+                </div>
+
+                {devCodeTip && (
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-xs rounded-2xl flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span className="font-semibold">{devCodeTip}</span>
+                  </div>
+                )}
+
+                {forgotStep === 'request' ? (
+                  <form onSubmit={handleForgotRequestSubmit} className="space-y-4">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-1.5">
+                        Email del tuo account *
+                      </label>
+                      <div className="relative">
+                        <Mail className="w-4 h-4 text-neutral-400 absolute left-3.5 top-3" />
+                        <input
+                          type="email"
+                          required
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          placeholder="es. mario.rossi@jesic.it"
+                          className="w-full pl-10 pr-3.5 py-2.5 bg-neutral-50 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white rounded-xl text-xs font-semibold focus:bg-white dark:focus:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#f23e2e] transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 rounded-2xl border border-neutral-100 dark:border-neutral-700/80 flex items-start gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+                      <KeyRound className="w-4 h-4 text-[#f23e2e] shrink-0 mt-0.5" />
+                      <p className="text-[11px] leading-relaxed">
+                        Riceverai un codice a 6 cifre valido per 15 minuti da inserire nella schermata successiva.
+                      </p>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isForgotLoading}
+                      className="w-full py-3 bg-[#f23e2e] hover:bg-red-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-red-600/25 transition-all flex items-center justify-center gap-1.5 active:scale-98 cursor-pointer disabled:opacity-60"
+                    >
+                      {isForgotLoading ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Invio codice in corso...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Invia codice di recupero</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+
+                    <div className="pt-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('login');
+                          setErrorMsg(null);
+                        }}
+                        className="text-xs font-semibold text-[#f23e2e] hover:underline cursor-pointer"
+                      >
+                        Ti ricordi la password? Torna ad Accedi
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handleForgotResetSubmit} className="space-y-4">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-1.5">
+                        Codice di Verifica a 6 cifre *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        maxLength={6}
+                        value={forgotCode}
+                        onChange={(e) => setForgotCode(e.target.value.replace(/\D/g, ''))}
+                        placeholder="Es. 123456"
+                        className="w-full px-3.5 py-2.5 tracking-widest text-center bg-neutral-50 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white rounded-xl text-base font-bold focus:bg-white dark:focus:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#f23e2e] transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-1.5">
+                        Nuova Password (minimo 6 caratteri) *
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-neutral-400 absolute left-3.5 top-3" />
+                        <input
+                          type={showForgotNewPassword ? 'text' : 'password'}
+                          required
+                          minLength={6}
+                          value={forgotNewPassword}
+                          onChange={(e) => setForgotNewPassword(e.target.value)}
+                          placeholder="Nuova password"
+                          className="w-full pl-10 pr-10 py-2.5 bg-neutral-50 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white rounded-xl text-xs font-semibold focus:bg-white dark:focus:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#f23e2e] transition-all"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
+                          className="absolute right-3.5 top-2.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
+                          tabIndex={-1}
+                        >
+                          {showForgotNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-1.5">
+                        Conferma Nuova Password *
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-neutral-400 absolute left-3.5 top-3" />
+                        <input
+                          type={showForgotNewPassword ? 'text' : 'password'}
+                          required
+                          minLength={6}
+                          value={forgotConfirmPassword}
+                          onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                          placeholder="Ripeti nuova password"
+                          className="w-full pl-10 pr-3.5 py-2.5 bg-neutral-50 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white rounded-xl text-xs font-semibold focus:bg-white dark:focus:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#f23e2e] transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isForgotLoading}
+                      className="w-full py-3 bg-[#f23e2e] hover:bg-red-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-red-600/25 transition-all flex items-center justify-center gap-1.5 active:scale-98 cursor-pointer disabled:opacity-60"
+                    >
+                      {isForgotLoading ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Reimpostazione in corso...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Salva Nuova Password</span>
+                          <CheckCircle2 className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setForgotStep('request')}
+                        className="text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 underline cursor-pointer"
+                      >
+                        Reinvia codice
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('login');
+                          setErrorMsg(null);
+                        }}
+                        className="text-xs font-semibold text-[#f23e2e] hover:underline cursor-pointer"
+                      >
+                        Torna ad Accedi
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
             )}
 
             {/* 2. CORPO: REGISTRAZIONE NUOVO PROFILO CON PASSWORD */}

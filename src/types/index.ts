@@ -18,6 +18,7 @@ export interface User {
   surname: string;
   email: string;
   password?: string;
+  hasPassword?: boolean;
   groupMemberships?: UserGroupMembership[];
   role?: UserRole; // compatibilità opzionale
   systemRole?: UserRole;

@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
 
@@ -319,6 +320,7 @@ app.get('/api/users', async (_req: Request, res: Response) => {
       email: u.email,
       avatarUrl: u.avatarUrl || null,
       googleCalendarConnected: Boolean(u.googleCalendarConnected),
+      hasPassword: Boolean(u.password && String(u.password).trim().length > 0),
       groupMemberships: u.groupMemberships || [],
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
@@ -458,6 +460,11 @@ const handleUserSync = async (req: Request, res: Response) => {
       if (defaultName && (!existing.name || existing.name === 'Utente')) existing.name = defaultName;
       if (defaultSurname && (!existing.surname || existing.surname === 'JESic')) existing.surname = defaultSurname;
       if (extractedAvatar && !existing.avatarUrl) existing.avatarUrl = extractedAvatar;
+      if (password && typeof password === 'string' && password.trim().length > 0) {
+        if (!existing.password || existing.password.trim() === '') {
+          existing.password = password.trim();
+        }
+      }
       if (actualAccessToken) existing.googleAccessToken = actualAccessToken;
       if (actualRefreshToken) {
         existing.googleRefreshToken = actualRefreshToken;
@@ -479,17 +486,19 @@ const handleUserSync = async (req: Request, res: Response) => {
         email: existing.email,
         avatarUrl: existing.avatarUrl || null,
         googleCalendarConnected: Boolean(existing.googleCalendarConnected),
+        hasPassword: Boolean(existing.password && String(existing.password).trim().length > 0),
         groupMemberships: existing.groupMemberships || [],
       };
       return res.json({ user: jsonUser });
     }
 
-    // REGOLA: Il nuovo utente deve essere creato SOLO con nome, cognome, email, avatarUrl, credenziali Google e un array groupMemberships: [] vuoto di default.
-    const newUserDoc = new User({
+    // REGOLA: Il nuovo utente viene creato con nome, cognome, email, avatarUrl, eventuale password, credenziali Google e groupMemberships vuoto.
+    const newUserDoc = new UserModel({
       _id: id || `user-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: defaultName,
       surname: defaultSurname,
       email: cleanEmail,
+      password: (password && typeof password === 'string') ? password.trim() : '',
       avatarUrl: extractedAvatar || null,
       googleCalendarConnected: actualRefreshToken ? true : googleCalendarConnected !== undefined ? Boolean(googleCalendarConnected) : false,
       googleAccessToken: actualAccessToken || null,
@@ -505,6 +514,7 @@ const handleUserSync = async (req: Request, res: Response) => {
       email: newUserDoc.email,
       avatarUrl: newUserDoc.avatarUrl,
       googleCalendarConnected: Boolean(newUserDoc.googleCalendarConnected),
+      hasPassword: Boolean(newUserDoc.password && String(newUserDoc.password).trim().length > 0),
       groupMemberships: newUserDoc.groupMemberships || [],
     };
 
@@ -517,6 +527,229 @@ const handleUserSync = async (req: Request, res: Response) => {
 
 app.post('/api/users', handleUserSync);
 app.post('/api/users/sync', handleUserSync);
+
+// POST /api/auth/login - Accesso con Email e Password
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Inserisci sia la tua email che la password di accesso.' });
+    }
+    const cleanEmail = String(email).toLowerCase().trim();
+    const cleanPassword = String(password).trim();
+
+    const user = await UserModel.findOne({ email: cleanEmail });
+    if (!user) {
+      return res.status(404).json({ error: 'Nessun account trovato con questa email. Crea un nuovo profilo.' });
+    }
+
+    // Se l'utente non ha ancora impostato una password (es. accesso iniziale con solo Google)
+    if (!user.password || String(user.password).trim().length === 0) {
+      return res.status(400).json({
+        error: 'Questo account è stato registrato tramite Google e non ha ancora una password impostata. Accedi tramite il pulsante Google per impostarla.',
+        needsGoogleLogin: true,
+      });
+    }
+
+    if (String(user.password).trim() !== cleanPassword) {
+      return res.status(401).json({
+        error: 'Password non corretta. Verifica le maiuscole/minuscole o clicca su "Password dimenticata?" sotto la barra.',
+      });
+    }
+
+    const jsonUser = {
+      id: user._id || user.id,
+      name: user.name,
+      surname: user.surname,
+      email: user.email,
+      avatarUrl: user.avatarUrl || null,
+      googleCalendarConnected: Boolean(user.googleCalendarConnected),
+      hasPassword: true,
+      groupMemberships: user.groupMemberships || [],
+    };
+
+    return res.json({ success: true, user: jsonUser });
+  } catch (err: any) {
+    console.error('Errore /api/auth/login:', err.message);
+    return res.status(500).json({ error: 'Errore durante l\'accesso. Riprova tra poco.' });
+  }
+});
+
+// POST /api/users/set-password - Impostazione o aggiornamento password
+app.post('/api/users/set-password', async (req: Request, res: Response) => {
+  try {
+    const { userId, email, password } = req.body;
+    if (!password || String(password).trim().length < 6) {
+      return res.status(400).json({ error: 'La password deve contenere almeno 6 caratteri.' });
+    }
+
+    let query: any = {};
+    if (userId) {
+      query.$or = [{ _id: userId }, { id: userId }];
+    } else if (email) {
+      query.email = String(email).toLowerCase().trim();
+    } else {
+      return res.status(400).json({ error: 'Identificativo utente non specificato.' });
+    }
+
+    const user = await UserModel.findOne(query);
+    if (!user) {
+      return res.status(404).json({ error: 'Utente non trovato.' });
+    }
+
+    user.password = String(password).trim();
+    await user.save();
+
+    const jsonUser = {
+      id: user._id || user.id,
+      name: user.name,
+      surname: user.surname,
+      email: user.email,
+      avatarUrl: user.avatarUrl || null,
+      googleCalendarConnected: Boolean(user.googleCalendarConnected),
+      hasPassword: true,
+      groupMemberships: user.groupMemberships || [],
+    };
+
+    return res.json({
+      success: true,
+      message: 'Password impostata con successo! Ora puoi accedere sia con Google che con email e password.',
+      user: jsonUser,
+    });
+  } catch (err: any) {
+    console.error('Errore /api/users/set-password:', err.message);
+    return res.status(500).json({ error: 'Errore durante l\'impostazione della password.' });
+  }
+});
+
+// POST /api/auth/forgot-password - Invio codice OTP a 6 cifre per recupero password
+app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Inserisci l\'indirizzo email associato al tuo profilo.' });
+    }
+    const cleanEmail = String(email).toLowerCase().trim();
+
+    const user = await UserModel.findOne({ email: cleanEmail });
+    if (!user) {
+      return res.status(404).json({ error: 'Nessun account registrato con questo indirizzo email.' });
+    }
+
+    // Genera codice numerico a 6 cifre (100000 - 999999) con scadenza a 15 minuti
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    user.resetPasswordCode = otpCode;
+    user.resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await user.save();
+
+    console.log(`[Password Reset OTP] Codice generato per ${cleanEmail}: ${otpCode}`);
+
+    // Tentativo di invio email con nodemailer
+    let emailSent = false;
+    try {
+      if (process.env.SMTP_USER || process.env.SMTP_HOST) {
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST || 'smtp.gmail.com',
+          port: Number(process.env.SMTP_PORT) || 587,
+          secure: process.env.SMTP_SECURE === 'true',
+          auth: process.env.SMTP_USER ? {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+          } : undefined,
+        });
+
+        await transporter.sendMail({
+          from: `"JESic Meet" <${process.env.SMTP_USER || 'info@jesic.it'}>`,
+          to: cleanEmail,
+          subject: 'Codice di recupero password - JESic Meet',
+          html: `
+            <div style="font-family: 'Ubuntu', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 16px; background-color: #ffffff;">
+              <h2 style="color: #1e1e1e; margin-bottom: 8px;">Recupero Password JESic Meet</h2>
+              <p style="color: #4b5563; font-size: 14px; line-height: 1.5;">Hai richiesto il ripristino della tua password per accedere alla piattaforma <strong>JESic Meet</strong>.</p>
+              <p style="color: #4b5563; font-size: 14px;">Utilizza il seguente codice di sicurezza temporaneo:</p>
+              <div style="text-align: center; margin: 24px 0;">
+                <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #f23e2e; background-color: #fef2f2; padding: 12px 24px; border-radius: 12px; border: 1px solid #fecaca; display: inline-block;">${otpCode}</span>
+              </div>
+              <p style="color: #6b7280; font-size: 12px; line-height: 1.4;">Il codice scadrà tra 15 minuti. Se non sei stato tu a richiedere il ripristino, ignora questa comunicazione.</p>
+              <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
+              <p style="color: #9ca3af; font-size: 11px; text-align: center;">Junior Enterprise Sicilia (JESic) • info@jesic.it</p>
+            </div>
+          `,
+        });
+        emailSent = true;
+      }
+    } catch (mailErr: any) {
+      console.warn('[Password Reset] Invio email non riuscito (fornito codice di sicurezza a video):', mailErr.message);
+    }
+
+    return res.json({
+      success: true,
+      message: emailSent
+        ? `Abbiamo inviato un codice di sicurezza a ${cleanEmail}.`
+        : `Codice di verifica generato con successo.`,
+      // devCode permette di testare immediatamente il flusso anche in assenza di server SMTP
+      devCode: otpCode,
+    });
+  } catch (err: any) {
+    console.error('Errore /api/auth/forgot-password:', err.message);
+    return res.status(500).json({ error: 'Errore durante l\'invio del codice di recupero.' });
+  }
+});
+
+// POST /api/auth/reset-password - Verifica codice OTP e salvataggio nuova password
+app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: 'Compila tutti i campi richiesti.' });
+    }
+    const cleanEmail = String(email).toLowerCase().trim();
+    const cleanCode = String(code).trim();
+    const cleanNewPassword = String(newPassword).trim();
+
+    if (cleanNewPassword.length < 6) {
+      return res.status(400).json({ error: 'La nuova password deve contenere almeno 6 caratteri.' });
+    }
+
+    const user = await UserModel.findOne({ email: cleanEmail });
+    if (!user) {
+      return res.status(404).json({ error: 'Utente non trovato.' });
+    }
+
+    if (!user.resetPasswordCode || user.resetPasswordCode !== cleanCode) {
+      return res.status(400).json({ error: 'Codice di verifica non valido o errato.' });
+    }
+
+    if (user.resetPasswordExpires && new Date() > user.resetPasswordExpires) {
+      return res.status(400).json({ error: 'Il codice di verifica è scaduto. Richiedine uno nuovo.' });
+    }
+
+    user.password = cleanNewPassword;
+    user.resetPasswordCode = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    const jsonUser = {
+      id: user._id || user.id,
+      name: user.name,
+      surname: user.surname,
+      email: user.email,
+      avatarUrl: user.avatarUrl || null,
+      googleCalendarConnected: Boolean(user.googleCalendarConnected),
+      hasPassword: true,
+      groupMemberships: user.groupMemberships || [],
+    };
+
+    return res.json({
+      success: true,
+      message: 'Password reimpostata con successo! Ora puoi accedere.',
+      user: jsonUser,
+    });
+  } catch (err: any) {
+    console.error('Errore /api/auth/reset-password:', err.message);
+    return res.status(500).json({ error: 'Errore durante il reset della password.' });
+  }
+});
 
 // PATCH /api/users/:id/role - Assegnazione 3 Ruoli ('user', 'admin', 'admin_clienti')
 app.patch('/api/users/:id/role', async (req: Request, res: Response) => {

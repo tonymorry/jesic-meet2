@@ -42,6 +42,7 @@ import { isInstalledPwa } from './utils/pwaHelper';
 import { PrivacyPolicyView } from './components/PrivacyPolicyView';
 import { TermsOfServiceView } from './components/TermsOfServiceView';
 import { PushBanner } from './components/PushBanner';
+import { SetGooglePasswordModal } from './components/SetGooglePasswordModal';
 import { autoSyncMeetingEventToCalendar } from './utils/googleWorkspaceAuth';
 import { prefetchChat, prefetchAllUserGroupsChats } from './utils/chatCache';
 import { realtimeClient, useRealtimeSubscription } from './utils/realtime';
@@ -119,6 +120,9 @@ export default function App() {
     }
     return null;
   });
+
+  // Utente Google che deve ancora impostare la propria password
+  const [userPendingPassword, setUserPendingPassword] = useState<User | null>(null);
 
   // Eventi creati (Inizialmente vuoto)
   const [events, setEvents] = useState<MeetingEvent[]>(() => {
@@ -912,6 +916,13 @@ export default function App() {
     setCurrentTab('groups');
   };
 
+  // Se l'utente corrente accede e non ha ancora impostato una password, richiedila subito
+  useEffect(() => {
+    if (currentUser && currentUser.hasPassword === false && !userPendingPassword) {
+      setUserPendingPassword(currentUser);
+    }
+  }, [currentUser, userPendingPassword]);
+
   // Accesso e Sincronizzazione con il vero Google OAuth2 (Authorization Code con permessi Google Calendar)
   const handleGoogleAuthCode = async (code: string) => {
     try {
@@ -935,7 +946,13 @@ export default function App() {
             authUser,
           ]);
           setCurrentUser(authUser);
-          setCurrentTab('groups');
+
+          // Se l'utente entra con Google e non ha ancora impostato una password, fagli spuntare subito la schermata
+          if (authUser.hasPassword === false) {
+            setUserPendingPassword(authUser);
+          } else {
+            setCurrentTab('groups');
+          }
           return;
         }
       } else {
@@ -2573,6 +2590,21 @@ export default function App() {
 
         </div>
       </div>
+      )}
+
+      {/* Modale Obbligatoria Impostazione Password per Utenti Google */}
+      {userPendingPassword && (
+        <SetGooglePasswordModal
+          user={userPendingPassword}
+          onPasswordSet={(updatedUser) => {
+            setCurrentUser(updatedUser);
+            setUsers((prev) =>
+              prev.map((u) => (u.id === updatedUser.id ? updatedUser : u))
+            );
+            setUserPendingPassword(null);
+            setCurrentTab('groups');
+          }}
+        />
       )}
     </>
   );
