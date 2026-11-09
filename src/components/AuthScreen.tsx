@@ -239,7 +239,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        setErrorMsg(data.error || 'Impossibile inviare l\'email con il codice. Verifica che l\'indirizzo sia corretto o controlla la configurazione SMTP.');
+        setErrorMsg(data.error || 'Impossibile inviare l\'email con il codice. Verifica che l\'indirizzo sia corretto o contatta l\'amministratore.');
         return;
       }
 

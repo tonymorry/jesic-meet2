@@ -18,17 +18,9 @@ import { fileURLToPath } from 'url';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import nodemailer from 'nodemailer';
-import dns from 'dns';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
 
-// Forza la risoluzione IPv4 per evitare stalli/timeout IPv6 con provider SMTP e cloud
-try {
-  if (dns && typeof (dns as any).setDefaultResultOrder === 'function') {
-    (dns as any).setDefaultResultOrder('ipv4first');
-  }
-} catch (_) {}
 
 // Gestione WebSocket per aggiornamenti istantanei in tempo reale (Chat, Nuovi Membri, Presenza, Eventi, Ruoli)
 let wss: WebSocketServer | null = null;
@@ -634,12 +626,10 @@ app.post('/api/users/set-password', async (req: Request, res: Response) => {
 const inMemoryResetCodes = new Map<string, { code: string; expires: number }>();
 
 /**
- * Helper per l'invio dell'email di recupero password:
- * Canale 1: Resend API (HTTPS porta 443) -> bypassa il blocco porte 25/465/587 di Render Free
- * Canale 2: Brevo API (HTTPS porta 443)  -> bypassa il blocco porte 25/465/587 di Render Free
- * Canale 3: Nodemailer SMTP con fallback porte (465 SSL <-> 587 TLS), rimozione automatica spazi da App Password e IPv4 forzato
+ * Invio email di recupero password tramite Resend API (HTTPS Porta 443)
+ * Utilizza la porta standard HTTPS, ideale per Render (nessun blocco firewall né timeout)
  */
-async function sendPasswordResetEmail(cleanEmail: string, otpCode: string): Promise<{ success: boolean; error?: string; provider?: string }> {
+async function sendPasswordResetEmail(cleanEmail: string, otpCode: string): Promise<{ success: boolean; error?: string }> {
   const subject = 'Codice di recupero password - JESic Meet';
   const textContent = `Il tuo codice di verifica per recuperare la password di JESic Meet è: ${otpCode}. Il codice scade tra 15 minuti. Inseriscilo nell'applicazione per impostare una nuova password.`;
   const htmlContent = `
@@ -659,157 +649,50 @@ async function sendPasswordResetEmail(cleanEmail: string, otpCode: string): Prom
     </div>
   `;
 
-  // CANALE 1: Resend API (HTTPS porta 443 - zero blocchi di rete su Render)
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
-  if (resendApiKey) {
-    try {
-      const resendFrom = process.env.RESEND_FROM?.trim() || 'JESic Meet <onboarding@resend.dev>';
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${resendApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: resendFrom,
-          to: [cleanEmail],
-          subject,
-          html: htmlContent,
-          text: textContent,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        console.log(`[Password Reset] Email inviata con successo via Resend API (porta 443 HTTPS) a ${cleanEmail}`);
-        return { success: true, provider: 'Resend API' };
-      }
-      console.warn(`[Password Reset] Risposta non OK da Resend API:`, data);
-    } catch (resendErr: any) {
-      console.warn(`[Password Reset] Errore chiamata Resend API:`, resendErr.message);
-    }
-  }
-
-  // CANALE 2: Brevo API (HTTPS porta 443)
-  const brevoApiKey = process.env.BREVO_API_KEY?.trim();
-  if (brevoApiKey) {
-    try {
-      const brevoFrom = process.env.BREVO_FROM?.trim() || 'info@jesic.it';
-      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'api-key': brevoApiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sender: { name: 'JESic Meet', email: brevoFrom },
-          to: [{ email: cleanEmail }],
-          subject,
-          htmlContent,
-          textContent,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        console.log(`[Password Reset] Email inviata con successo via Brevo API (porta 443 HTTPS) a ${cleanEmail}`);
-        return { success: true, provider: 'Brevo API' };
-      }
-      console.warn(`[Password Reset] Risposta non OK da Brevo API:`, data);
-    } catch (brevoErr: any) {
-      console.warn(`[Password Reset] Errore chiamata Brevo API:`, brevoErr.message);
-    }
-  }
-
-  // CANALE 3: SMTP Standard con Nodemailer
-  const smtpUser = process.env.SMTP_USER?.trim();
-  // Rimuoviamo gli spazi vuoti che gli utenti spesso copiano dalle "Password per le app" di Google (formato: "xxxx xxxx xxxx xxxx")
-  const rawPass = process.env.SMTP_PASS?.trim() || '';
-  const smtpPass = rawPass.replace(/\s+/g, '');
-  const smtpHost = process.env.SMTP_HOST?.trim();
-
-  const hasSmtpConfig = Boolean(smtpUser && smtpPass);
-  if (!hasSmtpConfig && !resendApiKey && !brevoApiKey) {
+  if (!resendApiKey) {
     return {
       success: false,
-      error: "Nessun servizio email configurato nel file .env o nelle variabili d'ambiente di hosting. Imposta RESEND_API_KEY (consigliato per Render, invia via HTTPS porta 443) oppure SMTP_USER e SMTP_PASS.",
+      error: "Servizio email non configurato. Inserisci la variabile RESEND_API_KEY nel pannello 'Environment' di Render (crea una chiave gratuita su resend.com).",
     };
   }
 
-  if (hasSmtpConfig) {
-    const isGmail = (!smtpHost || smtpHost.includes('gmail')) && (Boolean(smtpUser?.includes('@gmail.com')) || process.env.SMTP_SERVICE === 'gmail');
-    const fromAddress = process.env.SMTP_FROM || `"JESic Meet" <${smtpUser || 'info@jesic.it'}>`;
+  try {
+    const resendFrom = process.env.RESEND_FROM?.trim() || 'JESic Meet <onboarding@resend.dev>';
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: resendFrom,
+        to: [cleanEmail],
+        subject,
+        html: htmlContent,
+        text: textContent,
+      }),
+    });
 
-    // Tentativo con configurazioni multiple (porta 465 SSL vs porta 587 STARTTLS) per aggirare blocchi singoli
-    const attempts = [];
-    if (isGmail) {
-      attempts.push({ name: 'Gmail SSL (porta 465)', host: 'smtp.gmail.com', port: 465, secure: true });
-      attempts.push({ name: 'Gmail TLS (porta 587)', host: 'smtp.gmail.com', port: 587, secure: false });
-    } else {
-      const configuredPort = Number(process.env.SMTP_PORT) || 587;
-      const configuredSecure = process.env.SMTP_SECURE === 'true' || configuredPort === 465;
-      attempts.push({ name: `SMTP configurato (${smtpHost}:${configuredPort})`, host: smtpHost || 'smtp.gmail.com', port: configuredPort, secure: configuredSecure });
-      if (configuredPort === 465) {
-        attempts.push({ name: `SMTP fallback STARTTLS (${smtpHost}:587)`, host: smtpHost || 'smtp.gmail.com', port: 587, secure: false });
-      } else if (configuredPort === 587) {
-        attempts.push({ name: `SMTP fallback SSL (${smtpHost}:465)`, host: smtpHost || 'smtp.gmail.com', port: 465, secure: true });
-      }
+    const data: any = await res.json().catch(() => ({}));
+    if (res.ok) {
+      console.log(`[Password Reset] Email inviata con successo via Resend a ${cleanEmail}`);
+      return { success: true };
     }
 
-    let lastSmtpError = '';
-    for (const attempt of attempts) {
-      try {
-        console.log(`[Password Reset] Tentativo invio SMTP via ${attempt.name}...`);
-        const transporter = (nodemailer.createTransport as any)({
-          host: attempt.host,
-          port: attempt.port,
-          secure: attempt.secure,
-          auth: {
-            user: smtpUser,
-            pass: smtpPass,
-          },
-          family: 4, // Forza protocollo IPv4 per evitare stalli e timeout DNS IPv6
-          connectionTimeout: 5000,
-          greetingTimeout: 4000,
-          socketTimeout: 6000,
-          tls: {
-            rejectUnauthorized: false,
-          },
-        });
-
-        await transporter.sendMail({
-          from: fromAddress,
-          to: cleanEmail,
-          subject,
-          text: textContent,
-          html: htmlContent,
-        });
-
-        console.log(`[Password Reset] Email inviata con successo via ${attempt.name} a ${cleanEmail}`);
-        return { success: true, provider: attempt.name };
-      } catch (err: any) {
-        lastSmtpError = err.message || String(err);
-        console.warn(`[Password Reset] Tentativo con ${attempt.name} fallito: ${lastSmtpError}`);
-      }
-    }
-
-    // Se tutti i tentativi SMTP sono falliti per Connection timeout
-    const isTimeout = lastSmtpError.toLowerCase().includes('timeout') || lastSmtpError.toLowerCase().includes('etimedout') || lastSmtpError.toLowerCase().includes('econnrefused');
-    if (isTimeout) {
-      return {
-        success: false,
-        error: "Timeout di connessione SMTP. Render blocca le porte in uscita 25, 465 e 587 nei servizi gratuiti per policy anti-spam. Per inviare email reali senza blocchi da Render, aggiungi la variabile gratuita RESEND_API_KEY nel pannello 'Environment' di Render (invia su porta 443 HTTPS), oppure verifica che la Password per le app di Google non abbia restrizioni.",
-      };
-    }
-
+    const errorDetail = data?.message || data?.error || (typeof data === 'string' ? data : `Errore HTTP ${res.status}`);
+    console.warn(`[Password Reset] Risposta non OK da Resend:`, data);
     return {
       success: false,
-      error: `Errore SMTP: ${lastSmtpError}. Verifica che l'account Google abbia la 'Password per le app' attiva a 16 caratteri.`,
+      error: `Resend non è riuscito a recapitare l'email: ${errorDetail}`,
+    };
+  } catch (err: any) {
+    console.error(`[Password Reset] Eccezione chiamata Resend:`, err.message);
+    return {
+      success: false,
+      error: `Errore durante la connessione con Resend: ${err.message}`,
     };
   }
-
-  return {
-    success: false,
-    error: "Impossibile inviare l'email. Configura RESEND_API_KEY oppure SMTP_USER e SMTP_PASS.",
-  };
 }
 
 // POST /api/auth/forgot-password - Invio codice OTP a 6 cifre per recupero password
