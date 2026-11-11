@@ -83,10 +83,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [forgotStep, setForgotStep] = useState<'request' | 'verify'>('request');
   const [isForgotLoading, setIsForgotLoading] = useState(false);
 
-  // Hook useGoogleLogin con flow: 'auth-code' e scope Google Calendar Events
+  // Hook useGoogleLogin con flow: 'auth-code' e scope Google Calendar Events (Owned)
   const loginWithGoogle = useGoogleLogin({
     flow: 'auth-code',
-    scope: 'https://www.googleapis.com/auth/calendar.events',
+    scope: 'https://www.googleapis.com/auth/calendar.events.owned',
     onSuccess: async (codeResponse) => {
       if (codeResponse.code) {
         setErrorMsg(null);

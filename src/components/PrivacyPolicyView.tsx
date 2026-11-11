@@ -183,7 +183,7 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({ onBackToAp
               Qualora l&apos;utente scelga di attivare la sincronizzazione, JESic Meet richiede l&apos;autorizzazione esplicita tramite Google OAuth 2.0 per accedere al seguente scope:
             </p>
             <div className="p-3 rounded-xl bg-neutral-900 text-neutral-100 font-mono text-xs border border-neutral-800 overflow-x-auto">
-              https://www.googleapis.com/auth/calendar.events
+              https://www.googleapis.com/auth/calendar.events.owned
             </div>
             <p className="font-semibold text-neutral-900 dark:text-white">
               Le operazioni effettivamente svolte da JESic Meet tramite le API di Google Calendar sono:
