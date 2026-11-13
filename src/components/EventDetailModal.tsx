@@ -137,16 +137,77 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
     }
   }
 
+  // Helper di parsing flessibile per data (accetta GG/MM/AAAA o AAAA-MM-GG) e orario (HH:MM o HH.MM o H:MM)
+  const parseFlexibleDate = (raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    let yearNum: number;
+    let monthNum: number;
+    let dayNum: number;
+
+    const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(trimmed);
+    const itMatch = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/.exec(trimmed);
+
+    if (isoMatch) {
+      yearNum = parseInt(isoMatch[1], 10);
+      monthNum = parseInt(isoMatch[2], 10);
+      dayNum = parseInt(isoMatch[3], 10);
+    } else if (itMatch) {
+      dayNum = parseInt(itMatch[1], 10);
+      monthNum = parseInt(itMatch[2], 10);
+      yearNum = parseInt(itMatch[3], 10);
+    } else {
+      return null;
+    }
+
+    if (yearNum < 2000 || yearNum > 2100 || monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) {
+      return null;
+    }
+
+    const d = new Date(yearNum, monthNum - 1, dayNum);
+    if (d.getFullYear() !== yearNum || d.getMonth() !== monthNum - 1 || d.getDate() !== dayNum) {
+      return null;
+    }
+
+    return `${String(yearNum).padStart(4, '0')}-${String(monthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+  };
+
+  const toItalianDateStr = (isoDate: string): string => {
+    const parts = (isoDate || '').split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return isoDate;
+  };
+
+  const parseFlexibleTime = (raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const match = /^(\d{1,2})(?:[:.](\d{1,2}))?$/.exec(trimmed);
+    if (!match) return null;
+    const h = parseInt(match[1], 10);
+    const m = match[2] !== undefined ? parseInt(match[2], 10) : 0;
+    if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+      return null;
+    }
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
+
   // STATO PER SCELTA DATA E ORA CREATORE (Piena discrezione + sincronizzato con slot o top 3)
-  const [selectedFinalDate, setSelectedFinalDate] = useState<string>(
-    top3.length > 0 ? top3[0].date : (event.dates[0] || '')
-  );
-  const [selectedFinalStartTime, setSelectedFinalStartTime] = useState<string>(
+  const initialDateIso = top3.length > 0 ? top3[0].date : (event.dates[0] || '');
+  const [dateInput, setDateInput] = useState<string>(toItalianDateStr(initialDateIso));
+  const [startTimeInput, setStartTimeInput] = useState<string>(
     top3.length > 0 ? top3[0].startTime : (possibleStartTimes[0] || '09:00')
   );
-  const [selectedFinalEndTime, setSelectedFinalEndTime] = useState<string>(
+  const [endTimeInput, setEndTimeInput] = useState<string>(
     top3.length > 0 ? top3[0].endTime : (possibleEndTimes[0] || '10:00')
   );
+  const [confirmFormError, setConfirmFormError] = useState<string | null>(null);
+
+  const parsedFinalDate = parseFlexibleDate(dateInput);
+  const parsedFinalStartTime = parseFlexibleTime(startTimeInput);
+  const parsedFinalEndTime = parseFlexibleTime(endTimeInput);
 
   // STATO PER AGGIUNGERE NUOVI PARTECIPANTI DOPO LA CREAZIONE
   const [showAddAttendeeSection, setShowAddAttendeeSection] = useState(false);
@@ -157,9 +218,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
 
   // Formatta data per leggibilità (es. "Ven 17 Ott")
   const formatDateHuman = (dateStr: string) => {
-    if (!dateStr) return '';
-    const [year, month, day] = dateStr.split('-');
+    const normalized = parseFlexibleDate(dateStr);
+    if (!normalized) return dateStr || '';
+    const [year, month, day] = normalized.split('-');
     const d = new Date(Number(year), Number(month) - 1, Number(day));
+    if (isNaN(d.getTime())) return dateStr || '';
     return new Intl.DateTimeFormat('it-IT', {
       weekday: 'long',
       day: 'numeric',
@@ -168,9 +231,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
   };
 
   const formatDateShort = (dateStr: string) => {
-    if (!dateStr) return '';
-    const [year, month, day] = dateStr.split('-');
+    const normalized = parseFlexibleDate(dateStr);
+    if (!normalized) return dateStr || '';
+    const [year, month, day] = normalized.split('-');
     const d = new Date(Number(year), Number(month) - 1, Number(day));
+    if (isNaN(d.getTime())) return dateStr || '';
     return new Intl.DateTimeFormat('it-IT', {
       weekday: 'short',
       day: 'numeric',
@@ -195,35 +260,35 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
     setActiveSlotKey(slotKey);
     const analysis = slotAnalysisMap.get(slotKey);
     if (analysis && isCreator) {
-      setSelectedFinalDate(analysis.date);
-      setSelectedFinalStartTime(analysis.startTime);
-      setSelectedFinalEndTime(analysis.endTime);
+      setDateInput(toItalianDateStr(analysis.date));
+      setStartTimeInput(analysis.startTime);
+      setEndTimeInput(analysis.endTime);
+      setConfirmFormError(null);
     }
   };
 
-  // Modifica ora inizio nel form creatore
-  const handleStartTimeChange = (newStartTime: string) => {
-    setSelectedFinalStartTime(newStartTime);
-    // Se l'ora di fine è precedente o uguale alla nuova ora inizio, imposta la successiva
-    if (selectedFinalEndTime <= newStartTime) {
-      const laterTimes = possibleEndTimes.filter((t) => t > newStartTime);
-      if (laterTimes.length > 0) {
-        setSelectedFinalEndTime(laterTimes[0]);
-      }
-    }
-    setActiveSlotKey(`${selectedFinalDate}T${newStartTime}`);
-  };
-
-  // Esecuzione conferma data & ora (anche con assenze di essenziali)
+  // Esecuzione conferma data & ora (anche con assenze di essenziali o data/ora personalizzata)
   const handleExecuteConfirmation = () => {
-    if (!selectedFinalDate || !selectedFinalStartTime || !selectedFinalEndTime) return;
+    if (!parsedFinalDate) {
+      setConfirmFormError('Inserisci una data valida (es. 25/11/2026 oppure 2026-11-25).');
+      return;
+    }
+    if (!parsedFinalStartTime || !parsedFinalEndTime) {
+      setConfirmFormError('Inserisci orari validi nel formato HH:MM (es. 10:00 e 11:30).');
+      return;
+    }
+    if (parsedFinalStartTime >= parsedFinalEndTime) {
+      setConfirmFormError("L'ora di fine deve essere successiva all'ora di inizio.");
+      return;
+    }
+    setConfirmFormError(null);
     const slot = {
-      date: selectedFinalDate,
-      startTime: selectedFinalStartTime,
-      endTime: selectedFinalEndTime,
+      date: parsedFinalDate,
+      startTime: parsedFinalStartTime,
+      endTime: parsedFinalEndTime,
     };
     onConfirmMeetingSlot(event.id, slot);
-    setNotificationMsg(`Meeting confermato per il ${slot.date} (${slot.startTime} - ${slot.endTime})!`);
+    setNotificationMsg(`Meeting confermato per il ${toItalianDateStr(slot.date)} (${slot.startTime} - ${slot.endTime})!`);
   };
 
   const handleTriggerSimulatedReminders = () => {
@@ -314,8 +379,8 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
   );
 
   // Controllo dello slot scelto nel form per la decisione finale
-  const currentFormSlotKey = `${selectedFinalDate}T${selectedFinalStartTime}`;
-  const formSlotAnalysis = slotAnalysisMap.get(currentFormSlotKey);
+  const currentFormSlotKey = parsedFinalDate && parsedFinalStartTime ? `${parsedFinalDate}T${parsedFinalStartTime}` : '';
+  const formSlotAnalysis = currentFormSlotKey ? slotAnalysisMap.get(currentFormSlotKey) : undefined;
   const formMissingMandatory = formSlotAnalysis?.missingMandatoryUsers || [];
   const isAnyMandatoryMissingInForm = formMissingMandatory.length > 0;
 
@@ -648,9 +713,10 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setSelectedFinalDate(activeSlotDetails.date);
-                      setSelectedFinalStartTime(activeSlotDetails.startTime);
-                      setSelectedFinalEndTime(activeSlotDetails.endTime);
+                      setDateInput(toItalianDateStr(activeSlotDetails.date));
+                      setStartTimeInput(activeSlotDetails.startTime);
+                      setEndTimeInput(activeSlotDetails.endTime);
+                      setConfirmFormError(null);
                     }}
                     className="w-full mt-1.5 py-1.5 px-3 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 rounded-xl text-[11px] font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
                   >
@@ -725,8 +791,8 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                   <div className="grid grid-cols-3 gap-2">
                     {top3.map((slot, index) => {
                       const isSelected =
-                        selectedFinalDate === slot.date &&
-                        selectedFinalStartTime === slot.startTime;
+                        parsedFinalDate === slot.date &&
+                        parsedFinalStartTime === slot.startTime;
                       const totalInvitees = event.invitees.length;
                       const slotPercentage =
                         totalInvitees > 0
@@ -738,10 +804,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                           key={slot.slotKey}
                           type="button"
                           onClick={() => {
-                            setSelectedFinalDate(slot.date);
-                            setSelectedFinalStartTime(slot.startTime);
-                            setSelectedFinalEndTime(slot.endTime);
+                            setDateInput(toItalianDateStr(slot.date));
+                            setStartTimeInput(slot.startTime);
+                            setEndTimeInput(slot.endTime);
                             setActiveSlotKey(slot.slotKey);
+                            setConfirmFormError(null);
                           }}
                           className={`p-2.5 sm:p-3 rounded-2xl text-left border transition-all text-xs flex flex-col justify-between cursor-pointer ${
                             isSelected
@@ -789,65 +856,74 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {/* Selezione Giorno */}
+                  {/* Inserimento libero Data */}
                   <div>
                     <label className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold block mb-1">
-                      Data:
+                      Data (GG/MM/AAAA):
                     </label>
-                    <select
-                      value={selectedFinalDate}
+                    <input
+                      type="text"
+                      value={dateInput}
                       onChange={(e) => {
-                        setSelectedFinalDate(e.target.value);
-                        setActiveSlotKey(`${e.target.value}T${selectedFinalStartTime}`);
+                        const val = e.target.value;
+                        setDateInput(val);
+                        setConfirmFormError(null);
+                        const parsed = parseFlexibleDate(val);
+                        if (parsed && parsedFinalStartTime) {
+                          setActiveSlotKey(`${parsed}T${parsedFinalStartTime}`);
+                        }
                       }}
-                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2 text-neutral-900 dark:text-white font-semibold shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden"
-                    >
-                      {event.dates.map((d) => (
-                        <option key={d} value={d} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white">
-                          {formatDateShort(d)} ({d})
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="es. 25/11/2026"
+                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2.5 text-neutral-900 dark:text-white font-semibold font-mono shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden"
+                    />
                   </div>
 
-                  {/* Selezione Ora Inizio */}
+                  {/* Inserimento libero Ora Inizio */}
                   <div>
                     <label className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold block mb-1">
                       Dalle:
                     </label>
-                    <select
-                      value={selectedFinalStartTime}
-                      onChange={(e) => handleStartTimeChange(e.target.value)}
-                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2 text-neutral-900 dark:text-white font-semibold shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden"
-                    >
-                      {possibleStartTimes.map((t) => (
-                        <option key={t} value={t} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white">
-                          {t}
-                        </option>
-                      ))}
-                    </select>
+                    <input
+                      type="text"
+                      value={startTimeInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setStartTimeInput(val);
+                        setConfirmFormError(null);
+                        const parsed = parseFlexibleTime(val);
+                        if (parsedFinalDate && parsed) {
+                          setActiveSlotKey(`${parsedFinalDate}T${parsed}`);
+                        }
+                      }}
+                      placeholder="es. 10:00"
+                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2.5 text-neutral-900 dark:text-white font-semibold font-mono shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden"
+                    />
                   </div>
 
-                  {/* Selezione Ora Fine */}
+                  {/* Inserimento libero Ora Fine */}
                   <div>
                     <label className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold block mb-1">
                       Alle:
                     </label>
-                    <select
-                      value={selectedFinalEndTime}
-                      onChange={(e) => setSelectedFinalEndTime(e.target.value)}
-                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2 text-neutral-900 dark:text-white font-semibold shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden"
-                    >
-                      {possibleEndTimes
-                        .filter((t) => t > selectedFinalStartTime)
-                        .map((t) => (
-                          <option key={t} value={t} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white">
-                            {t}
-                          </option>
-                        ))}
-                    </select>
+                    <input
+                      type="text"
+                      value={endTimeInput}
+                      onChange={(e) => {
+                        setEndTimeInput(e.target.value);
+                        setConfirmFormError(null);
+                      }}
+                      placeholder="es. 11:30"
+                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2.5 text-neutral-900 dark:text-white font-semibold font-mono shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden"
+                    />
                   </div>
                 </div>
+
+                {confirmFormError && (
+                  <div className="p-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-lg text-[11px] text-red-700 dark:text-red-300 flex items-center gap-1.5 font-semibold">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />
+                    <span>{confirmFormError}</span>
+                  </div>
+                )}
 
                 {/* Riepilogo presenza & percentuale per l'orario scelto nel modulo */}
                 {(() => {
@@ -861,39 +937,47 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                     <div className="p-2.5 bg-neutral-100/90 dark:bg-neutral-800/90 border border-neutral-200/90 dark:border-neutral-700 rounded-lg text-[11px] text-neutral-800 dark:text-neutral-200 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 font-semibold text-neutral-700 dark:text-neutral-300">
                         <Users className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400 shrink-0" />
-                        <span>Presenti per questo orario:</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-neutral-900 dark:text-white">
-                          {formAvailableCount} su {totalInviteesCount}
-                        </span>
-                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200/80 dark:bg-red-950/60 dark:text-red-400 dark:border-red-900/60">
-                          {formPercentage}%
+                        <span>
+                          {formSlotAnalysis
+                            ? 'Presenti per questo orario:'
+                            : 'Data o orario personalizzato (fuori griglia sondaggio)'}
                         </span>
                       </div>
+                      {formSlotAnalysis && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-neutral-900 dark:text-white">
+                            {formAvailableCount} su {totalInviteesCount}
+                          </span>
+                          <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200/80 dark:bg-red-950/60 dark:text-red-400 dark:border-red-900/60">
+                            {formPercentage}%
+                          </span>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
 
                 {/* Feedback presenza dello slot scelto */}
-                {isAnyMandatoryMissingInForm ? (
-                  <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-[11px] text-amber-900 dark:text-amber-200 space-y-1">
-                    <div className="flex items-center gap-1 font-bold text-amber-800 dark:text-amber-300">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                      <span>Membri essenziali assenti in questo orario:</span>
+                {formSlotAnalysis && (
+                  isAnyMandatoryMissingInForm ? (
+                    <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-[11px] text-amber-900 dark:text-amber-200 space-y-1">
+                      <div className="flex items-center gap-1 font-bold text-amber-800 dark:text-amber-300">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <span>Membri essenziali assenti in questo orario:</span>
+                      </div>
+                      <p className="text-[10px] text-amber-800 dark:text-amber-300 font-semibold">
+                        {formMissingMandatory.map((u) => `${u.name} ${u.surname}`).join(', ')}
+                      </p>
+                      <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                        In qualità di organizzatore puoi comunque procedere e confermare questo orario a tua piena discrezione.
+                      </p>
                     </div>
-                    <p className="text-[10px] text-amber-800 dark:text-amber-300 font-semibold">
-                      {formMissingMandatory.map((u) => `${u.name} ${u.surname}`).join(', ')}
-                    </p>
-                    <p className="text-[10px] text-amber-700 dark:text-amber-400">
-                      In qualità di organizzatore puoi comunque procedere e confermare questo orario a tua piena discrezione.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg text-[11px] text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 font-semibold">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <span>Tutti i membri essenziali sono presenti per questo slot!</span>
-                  </div>
+                  ) : (
+                    <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg text-[11px] text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>Tutti i membri essenziali sono presenti per questo slot!</span>
+                    </div>
+                  )
                 )}
 
                 {/* Bottone di Conferma Definitiva */}
@@ -908,7 +992,9 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                 >
                   <Check className="w-4 h-4 stroke-[2.5px]" />
                   <span>
-                    Conferma Meeting ({formatDateShort(selectedFinalDate)} · {selectedFinalStartTime} - {selectedFinalEndTime})
+                    {parsedFinalDate && parsedFinalStartTime && parsedFinalEndTime
+                      ? `Conferma Meeting (${formatDateShort(parsedFinalDate)} · ${parsedFinalStartTime} - ${parsedFinalEndTime})`
+                      : 'Conferma Meeting'}
                   </span>
                 </button>
               </div>
