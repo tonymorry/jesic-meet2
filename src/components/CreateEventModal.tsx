@@ -213,6 +213,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   const [manualEmailInput, setManualEmailInput] = useState('');
   const [showManualAddFields, setShowManualAddFields] = useState(false);
   const [directEmailInput, setDirectEmailInput] = useState('');
+  const [directEmailError, setDirectEmailError] = useState<string | null>(null);
   const [externalInviteEmails, setExternalInviteEmails] = useState<string[]>(
     eventToEdit?.externalInviteEmails || []
   );
@@ -439,9 +440,13 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   // Inserimento rapido diretto via email (sia dentro che fuori dal gruppo)
   const handleDirectEmailAdd = () => {
     const emailClean = directEmailInput.trim().toLowerCase();
-    if (!emailClean || !emailClean.includes('@')) return;
+    if (!emailClean || !emailClean.includes('@')) {
+      setDirectEmailError('Inserisci un indirizzo email valido (es. nome@dominio.it).');
+      return;
+    }
+    setDirectEmailError(null);
 
-    const existing = combinedRegisteredUsers.find((u) => u.email.toLowerCase() === emailClean);
+    const existing = allKnownUsers.find((u) => u.email.toLowerCase() === emailClean);
     if (existing) {
       if (!selectedInvitees.some((i) => i.user.id === existing.id)) {
         setSelectedInvitees([...selectedInvitees, { user: existing, isMandatory: false }]);
@@ -480,11 +485,63 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
 
   const handleRemoveInvitee = (userId: string) => {
     if (userId === currentUser.id) return;
+    const removed = selectedInvitees.find((i) => i.user.id === userId);
     setSelectedInvitees(selectedInvitees.filter((i) => i.user.id !== userId));
+    if (removed?.user?.email) {
+      const removedEmail = removed.user.email.toLowerCase();
+      setExternalInviteEmails((prev) => prev.filter((em) => em.toLowerCase() !== removedEmail));
+    }
   };
 
-  const combinedRegisteredUsers = [...allUsers, ...newlyCreatedUsers];
-  const filteredDropdownUsers = combinedRegisteredUsers.filter((u) =>
+  // Tutti gli utenti noti (usato per risolvere i contatti quando si invita per email dalla Home o esternamente)
+  const allKnownUsers = [...allUsers, ...newlyCreatedUsers];
+
+  // Utenti filtrati in base al contesto:
+  // - Home (!activeGroup): lista vuota (la tendina viene nascosta, si invita tramite email)
+  // - Gruppo (!activeSubgroup): SOLO i partecipanti del gruppo attivo
+  // - Sottogruppo (activeSubgroup): SOLO i partecipanti di quel sottogruppo (o del gruppo se pubblico)
+  const scopedRegisteredUsers: User[] = (() => {
+    if (!activeGroup) return [];
+
+    const groupMemberIds = (activeGroup.members || []).map((m: any) =>
+      typeof m === 'string' ? m : m.userId
+    );
+
+    let allowedIds: Set<string>;
+    if (activeSubgroup) {
+      const subMembers = Array.isArray(activeSubgroup.members) ? activeSubgroup.members : [];
+      if (activeSubgroup.isPublic) {
+        allowedIds = new Set(
+          [
+            activeGroup.creatorId,
+            ...groupMemberIds,
+            activeSubgroup.createdBy,
+            ...subMembers,
+            currentUser.id,
+          ].filter(Boolean)
+        );
+      } else {
+        allowedIds = new Set(
+          [activeSubgroup.createdBy, ...subMembers, currentUser.id].filter(Boolean)
+        );
+      }
+    } else {
+      allowedIds = new Set(
+        [activeGroup.creatorId, ...groupMemberIds, currentUser.id].filter(Boolean)
+      );
+    }
+
+    const scopedBase = allUsers.filter((u) => allowedIds.has(u.id));
+    const merged = [...scopedBase, ...newlyCreatedUsers];
+    const seen = new Set<string>();
+    return merged.filter((u) => {
+      if (seen.has(u.id)) return false;
+      seen.add(u.id);
+      return true;
+    });
+  })();
+
+  const filteredDropdownUsers = scopedRegisteredUsers.filter((u) =>
     `${u.name} ${u.surname} ${u.role || ''} ${u.email}`
       .toLowerCase()
       .includes(dropdownFilterQuery.toLowerCase())
@@ -1285,29 +1342,27 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                 </p>
               </div>
 
-              {/* BANNER SE APERTO DENTRO UN GRUPPO: INVITO RAPIDO MEMBRI GRUPPO */}
+              {/* BANNER SE APERTO DENTRO UN GRUPPO O SOTTOGRUPPO: INVITO RAPIDO MEMBRI DEL CONTESTO */}
               {activeGroup && (
                 <div className="bg-red-50/70 dark:bg-red-950/40 border border-red-200/80 dark:border-red-900/50 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-2xs">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className="text-xl shrink-0 p-1 bg-white dark:bg-neutral-800 rounded-xl border border-red-100 dark:border-red-900/40">
-                      {activeGroup.avatar || '👥'}
+                      {activeSubgroup ? (activeSubgroup.avatar || '📂') : (activeGroup.avatar || '👥')}
                     </span>
                     <div className="min-w-0">
                       <p className="text-xs font-black text-neutral-900 dark:text-white truncate">
-                        Gruppo: {activeGroup.name}
+                        {activeSubgroup ? `Sottogruppo: ${activeSubgroup.name}` : `Gruppo: ${activeGroup.name}`}
                       </p>
                       <p className="text-[10px] text-neutral-500 dark:text-neutral-400">
-                        {activeGroup.members.length} membri in questo gruppo
+                        {scopedRegisteredUsers.length} {activeSubgroup ? 'partecipanti in questo sottogruppo' : 'membri in questo gruppo'}
                       </p>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      const groupUserIds = activeGroup.members.map((m) => m.userId);
-                      const groupUsers = allUsers.filter((u) => groupUserIds.includes(u.id));
                       const newSelected = [...selectedInvitees];
-                      groupUsers.forEach((u) => {
+                      scopedRegisteredUsers.forEach((u) => {
                         if (!newSelected.some((item) => item.user.id === u.id)) {
                           newSelected.push({ user: u, isMandatory: false });
                         }
@@ -1321,12 +1376,12 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                 </div>
               )}
 
-              {/* INVITO DIRETTO TRAMITE EMAIL (CASO UTENTE FUORI DAL GRUPPO & INVITATI ESTERNI) */}
+              {/* INVITO DIRETTO TRAMITE EMAIL (CASO HOME / UTENTE FUORI DAL GRUPPO & INVITATI ESTERNI) */}
               <div className="bg-neutral-50 dark:bg-neutral-800/80 p-3 rounded-2xl border border-neutral-200 dark:border-neutral-700 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
                     <Mail className="w-4 h-4 text-[#f23e2e]" />
-                    <span>Invita per indirizzo email {!activeGroup ? '(Fuori dal gruppo)' : ''}</span>
+                    <span>Invita tramite indirizzo email</span>
                   </span>
                   <span className="text-[10px] text-neutral-400 font-mono">
                     Rapido & Diretto
@@ -1336,7 +1391,10 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                   <input
                     type="email"
                     value={directEmailInput}
-                    onChange={(e) => setDirectEmailInput(e.target.value)}
+                    onChange={(e) => {
+                      setDirectEmailInput(e.target.value);
+                      if (directEmailError) setDirectEmailError(null);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -1355,97 +1413,104 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                     + Invita
                   </button>
                 </div>
-              </div>
-
-              {/* TENDINA PER SELEZIONARE DAI REGISTRATI */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="w-full p-2.5 bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 rounded-xl text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center justify-between transition-all cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <Users className="w-4 h-4 text-red-600 dark:text-red-400" />
-                    <span>
-                      Scegli tra i membri registrati ({combinedRegisteredUsers.length})
-                    </span>
-                  </div>
-                  <ChevronDown
-                    className={`w-4 h-4 text-neutral-400 transition-transform ${
-                      isDropdownOpen ? 'rotate-180 text-red-600 dark:text-red-400' : ''
-                    }`}
-                  />
-                </button>
-
-                {isDropdownOpen && (
-                  <div className="mt-2 p-2.5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl shadow-xl space-y-2 animate-in fade-in">
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-neutral-400" />
-                      <input
-                        type="text"
-                        autoFocus
-                        value={dropdownFilterQuery}
-                        onChange={(e) => setDropdownFilterQuery(e.target.value)}
-                        placeholder="Scrivi il nome o ruolo per filtrare..."
-                        className="w-full pl-8 pr-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white rounded-lg text-xs font-medium focus:bg-white dark:focus:bg-neutral-900 focus:outline-none focus:border-red-500"
-                      />
-                    </div>
-
-                    <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
-                      {filteredDropdownUsers.length === 0 ? (
-                        <p className="text-xs text-neutral-400 p-2 text-center">
-                          Nessun membro corrisponde alla ricerca.
-                        </p>
-                      ) : (
-                        filteredDropdownUsers.map((user) => {
-                          const isSelected = selectedInvitees.some((i) => i.user.id === user.id);
-                          const isCreator = user.id === currentUser.id;
-
-                          return (
-                            <button
-                              type="button"
-                              key={user.id}
-                              onClick={() => handleToggleUserFromDropdown(user)}
-                              disabled={isCreator}
-                              className={`w-full p-2 rounded-xl text-left flex items-center justify-between text-xs transition-colors cursor-pointer ${
-                                isSelected
-                                  ? 'bg-red-50/80 dark:bg-red-950/60 text-red-950 dark:text-red-200 font-semibold'
-                                  : 'hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2">
-                                <UserAvatar user={user} size="sm" />
-                                <div className="truncate">
-                                  <p className="truncate text-neutral-900 dark:text-white">
-                                    {user.name} {user.surname}
-                                    {isCreator && ' (Tu - Organizzatore)'}
-                                  </p>
-                                  <p className="text-[10px] text-neutral-400 truncate">
-                                    {user.role ? `${user.role} · ${user.email}` : user.email}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="shrink-0 ml-2">
-                                {isSelected ? (
-                                  <span className="text-[10px] font-bold text-red-600 dark:text-red-400 flex items-center gap-0.5">
-                                    <Check className="w-3 h-3 stroke-[3px]" />
-                                    Aggiunto
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200">
-                                    + Aggiungi
-                                  </span>
-                                )}
-                              </div>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
+                {directEmailError && (
+                  <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">
+                    {directEmailError}
+                  </p>
                 )}
               </div>
+
+              {/* TENDINA PER SELEZIONARE DAI MEMBRI REGISTRATI (VISIBILE SOLO NEI GRUPPI E SOTTOGRUPPI) */}
+              {activeGroup && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                    className="w-full p-2.5 bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 rounded-xl text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center justify-between transition-all cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Users className="w-4 h-4 text-red-600 dark:text-red-400" />
+                      <span>
+                        Scegli tra i membri registrati ({scopedRegisteredUsers.length})
+                      </span>
+                    </div>
+                    <ChevronDown
+                      className={`w-4 h-4 text-neutral-400 transition-transform ${
+                        isDropdownOpen ? 'rotate-180 text-red-600 dark:text-red-400' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {isDropdownOpen && (
+                    <div className="mt-2 p-2.5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl shadow-xl space-y-2 animate-in fade-in">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-neutral-400" />
+                        <input
+                          type="text"
+                          autoFocus
+                          value={dropdownFilterQuery}
+                          onChange={(e) => setDropdownFilterQuery(e.target.value)}
+                          placeholder="Scrivi il nome o ruolo per filtrare..."
+                          className="w-full pl-8 pr-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white rounded-lg text-xs font-medium focus:bg-white dark:focus:bg-neutral-900 focus:outline-none focus:border-red-500"
+                        />
+                      </div>
+
+                      <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                        {filteredDropdownUsers.length === 0 ? (
+                          <p className="text-xs text-neutral-400 p-2 text-center">
+                            Nessun membro corrisponde alla ricerca.
+                          </p>
+                        ) : (
+                          filteredDropdownUsers.map((user) => {
+                            const isSelected = selectedInvitees.some((i) => i.user.id === user.id);
+                            const isCreator = user.id === currentUser.id;
+
+                            return (
+                              <button
+                                type="button"
+                                key={user.id}
+                                onClick={() => handleToggleUserFromDropdown(user)}
+                                disabled={isCreator}
+                                className={`w-full p-2 rounded-xl text-left flex items-center justify-between text-xs transition-colors cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-red-50/80 dark:bg-red-950/60 text-red-950 dark:text-red-200 font-semibold'
+                                    : 'hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <UserAvatar user={user} size="sm" />
+                                  <div className="truncate">
+                                    <p className="truncate text-neutral-900 dark:text-white">
+                                      {user.name} {user.surname}
+                                      {isCreator && ' (Tu - Organizzatore)'}
+                                    </p>
+                                    <p className="text-[10px] text-neutral-400 truncate">
+                                      {user.role ? `${user.role} · ${user.email}` : user.email}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="shrink-0 ml-2">
+                                  {isSelected ? (
+                                    <span className="text-[10px] font-bold text-red-600 dark:text-red-400 flex items-center gap-0.5">
+                                      <Check className="w-3 h-3 stroke-[3px]" />
+                                      Aggiunto
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200">
+                                      + Aggiungi
+                                    </span>
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* INSERIMENTO DIRETTO PER NOME O EMAIL */}
               <div className="bg-neutral-50 dark:bg-neutral-800/80 p-3 rounded-2xl border border-neutral-200 dark:border-neutral-700">
