@@ -159,9 +159,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
   const formatDateHuman = (dateStr: string) => {
     if (!dateStr) return '';
     const [year, month, day] = dateStr.split('-');
-    if (!year || !month || !day || year.length !== 4) return dateStr;
     const d = new Date(Number(year), Number(month) - 1, Number(day));
-    if (isNaN(d.getTime())) return dateStr;
     return new Intl.DateTimeFormat('it-IT', {
       weekday: 'long',
       day: 'numeric',
@@ -172,9 +170,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
   const formatDateShort = (dateStr: string) => {
     if (!dateStr) return '';
     const [year, month, day] = dateStr.split('-');
-    if (!year || !month || !day || year.length !== 4) return dateStr;
     const d = new Date(Number(year), Number(month) - 1, Number(day));
-    if (isNaN(d.getTime())) return dateStr;
     return new Intl.DateTimeFormat('it-IT', {
       weekday: 'short',
       day: 'numeric',
@@ -205,34 +201,22 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
     }
   };
 
-  // Modifica ora inizio nel form creatore (supporta qualsiasi orario libero HH:mm)
+  // Modifica ora inizio nel form creatore
   const handleStartTimeChange = (newStartTime: string) => {
     setSelectedFinalStartTime(newStartTime);
-    if (newStartTime && selectedFinalEndTime && selectedFinalEndTime <= newStartTime) {
-      const [hStr, mStr] = newStartTime.split(':');
-      const h = parseInt(hStr, 10);
-      const m = parseInt(mStr, 10);
-      if (!isNaN(h) && !isNaN(m)) {
-        const totalEndMins = Math.min(23 * 60 + 59, h * 60 + m + (step || 60));
-        const endH = Math.floor(totalEndMins / 60);
-        const endM = totalEndMins % 60;
-        setSelectedFinalEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+    // Se l'ora di fine è precedente o uguale alla nuova ora inizio, imposta la successiva
+    if (selectedFinalEndTime <= newStartTime) {
+      const laterTimes = possibleEndTimes.filter((t) => t > newStartTime);
+      if (laterTimes.length > 0) {
+        setSelectedFinalEndTime(laterTimes[0]);
       }
     }
-    if (selectedFinalDate && newStartTime) {
-      setActiveSlotKey(`${selectedFinalDate}T${newStartTime}`);
-    }
+    setActiveSlotKey(`${selectedFinalDate}T${newStartTime}`);
   };
 
-  const isCustomTimeRangeInvalid =
-    !selectedFinalDate ||
-    !selectedFinalStartTime ||
-    !selectedFinalEndTime ||
-    selectedFinalStartTime >= selectedFinalEndTime;
-
-  // Esecuzione conferma data & ora (anche con assenze di essenziali o data/ora personalizzata)
+  // Esecuzione conferma data & ora (anche con assenze di essenziali)
   const handleExecuteConfirmation = () => {
-    if (isCustomTimeRangeInvalid) return;
+    if (!selectedFinalDate || !selectedFinalStartTime || !selectedFinalEndTime) return;
     const slot = {
       date: selectedFinalDate,
       startTime: selectedFinalStartTime,
@@ -731,19 +715,18 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* I TOP 3 SLOT CONSIGLIATI (Comandi veloci di compilazione) */}
+              {/* I TOP 3 SLOT CONSIGLIATI (In piccolo, nello stesso riquadro come richiesto) */}
               {top3.length > 0 && (
                 <div>
                   <p className="text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 mb-1.5 flex items-center gap-1">
                     <Sparkles className="w-3 h-3 text-red-600 dark:text-red-400" />
-                    <span>Comandi veloci · Top 3 per presenza (tocca per compilare):</span>
+                    <span>Top 3 Slot Consigliati (Tocca per compilare):</span>
                   </p>
                   <div className="grid grid-cols-3 gap-2">
                     {top3.map((slot, index) => {
                       const isSelected =
                         selectedFinalDate === slot.date &&
-                        selectedFinalStartTime === slot.startTime &&
-                        selectedFinalEndTime === slot.endTime;
+                        selectedFinalStartTime === slot.startTime;
                       const totalInvitees = event.invitees.length;
                       const slotPercentage =
                         totalInvitees > 0
@@ -799,146 +782,125 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                 </div>
               )}
 
-              {/* CAMPI LIBERI: L'ORGANIZZATORE PUÒ INSERIRE QUALSIASI DATA E ORARIO */}
+              {/* CAMPI INTERAMENTE MODIFICABILI A PIENA DISCREZIONE DEL CREATORE */}
               <div className="bg-neutral-50/90 dark:bg-neutral-800/90 rounded-xl p-3 border border-neutral-200 dark:border-neutral-700 space-y-2.5">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-[10px] font-extrabold uppercase tracking-wider text-neutral-600 dark:text-neutral-400">
-                    Scelta Libera Data e Orario (anche diversi dal sondaggio):
-                  </p>
-                </div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-neutral-600 dark:text-neutral-400">
+                  Orario Personalizzabile (Piena Discrezione):
+                </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {/* Scelta Libera Giorno */}
+                  {/* Selezione Giorno */}
                   <div>
-                    <label
-                      htmlFor="confirm-meeting-date"
-                      className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold block mb-1"
-                    >
+                    <label className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold block mb-1">
                       Data:
                     </label>
-                    <input
-                      id="confirm-meeting-date"
-                      type="date"
+                    <select
                       value={selectedFinalDate}
                       onChange={(e) => {
-                        const newDate = e.target.value;
-                        setSelectedFinalDate(newDate);
-                        if (newDate && selectedFinalStartTime) {
-                          setActiveSlotKey(`${newDate}T${selectedFinalStartTime}`);
-                        }
+                        setSelectedFinalDate(e.target.value);
+                        setActiveSlotKey(`${e.target.value}T${selectedFinalStartTime}`);
                       }}
-                      style={{ colorScheme: 'light dark' }}
-                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2.5 text-neutral-900 dark:text-white font-semibold shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden cursor-pointer"
-                    />
+                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2 text-neutral-900 dark:text-white font-semibold shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden"
+                    >
+                      {event.dates.map((d) => (
+                        <option key={d} value={d} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white">
+                          {formatDateShort(d)} ({d})
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                  {/* Scelta Libera Ora Inizio */}
+                  {/* Selezione Ora Inizio */}
                   <div>
-                    <label
-                      htmlFor="confirm-meeting-start"
-                      className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold block mb-1"
-                    >
+                    <label className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold block mb-1">
                       Dalle:
                     </label>
-                    <input
-                      id="confirm-meeting-start"
-                      type="time"
+                    <select
                       value={selectedFinalStartTime}
                       onChange={(e) => handleStartTimeChange(e.target.value)}
-                      style={{ colorScheme: 'light dark' }}
-                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2.5 text-neutral-900 dark:text-white font-semibold font-mono shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden cursor-pointer"
-                    />
+                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2 text-neutral-900 dark:text-white font-semibold shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden"
+                    >
+                      {possibleStartTimes.map((t) => (
+                        <option key={t} value={t} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white">
+                          {t}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                  {/* Scelta Libera Ora Fine */}
+                  {/* Selezione Ora Fine */}
                   <div>
-                    <label
-                      htmlFor="confirm-meeting-end"
-                      className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold block mb-1"
-                    >
+                    <label className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold block mb-1">
                       Alle:
                     </label>
-                    <input
-                      id="confirm-meeting-end"
-                      type="time"
+                    <select
                       value={selectedFinalEndTime}
                       onChange={(e) => setSelectedFinalEndTime(e.target.value)}
-                      style={{ colorScheme: 'light dark' }}
-                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2.5 text-neutral-900 dark:text-white font-semibold font-mono shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden cursor-pointer"
-                    />
+                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs py-1.5 px-2 text-neutral-900 dark:text-white font-semibold shadow-xs focus:ring-2 focus:ring-red-500/20 focus:border-red-500 focus:outline-hidden"
+                    >
+                      {possibleEndTimes
+                        .filter((t) => t > selectedFinalStartTime)
+                        .map((t) => (
+                          <option key={t} value={t} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white">
+                            {t}
+                          </option>
+                        ))}
+                    </select>
                   </div>
                 </div>
 
-                {/* Riepilogo presenza & feedback dello slot scelto */}
-                {formSlotAnalysis ? (
-                  <>
-                    {(() => {
-                      const formAvailableCount = formSlotAnalysis.availableUsers.length;
-                      const totalInviteesCount = event.invitees.length;
-                      const formPercentage =
-                        totalInviteesCount > 0
-                          ? Math.round((formAvailableCount / totalInviteesCount) * 100)
-                          : 0;
-                      return (
-                        <div className="p-2.5 bg-neutral-100/90 dark:bg-neutral-800/90 border border-neutral-200/90 dark:border-neutral-700 rounded-lg text-[11px] text-neutral-800 dark:text-neutral-200 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 font-semibold text-neutral-700 dark:text-neutral-300">
-                            <Users className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400 shrink-0" />
-                            <span>Presenti per questo orario:</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-neutral-900 dark:text-white">
-                              {formAvailableCount} su {totalInviteesCount}
-                            </span>
-                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200/80 dark:bg-red-950/60 dark:text-red-400 dark:border-red-900/60">
-                              {formPercentage}%
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                {/* Riepilogo presenza & percentuale per l'orario scelto nel modulo */}
+                {(() => {
+                  const formAvailableCount = formSlotAnalysis?.availableUsers.length || 0;
+                  const totalInviteesCount = event.invitees.length;
+                  const formPercentage =
+                    totalInviteesCount > 0
+                      ? Math.round((formAvailableCount / totalInviteesCount) * 100)
+                      : 0;
+                  return (
+                    <div className="p-2.5 bg-neutral-100/90 dark:bg-neutral-800/90 border border-neutral-200/90 dark:border-neutral-700 rounded-lg text-[11px] text-neutral-800 dark:text-neutral-200 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-semibold text-neutral-700 dark:text-neutral-300">
+                        <Users className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400 shrink-0" />
+                        <span>Presenti per questo orario:</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-neutral-900 dark:text-white">
+                          {formAvailableCount} su {totalInviteesCount}
+                        </span>
+                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200/80 dark:bg-red-950/60 dark:text-red-400 dark:border-red-900/60">
+                          {formPercentage}%
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
-                    {isAnyMandatoryMissingInForm ? (
-                      <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-[11px] text-amber-900 dark:text-amber-200 space-y-1">
-                        <div className="flex items-center gap-1 font-bold text-amber-800 dark:text-amber-300">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                          <span>Membri essenziali assenti in questo orario:</span>
-                        </div>
-                        <p className="text-[10px] text-amber-800 dark:text-amber-300 font-semibold">
-                          {formMissingMandatory.map((u) => `${u.name} ${u.surname}`).join(', ')}
-                        </p>
-                        <p className="text-[10px] text-amber-700 dark:text-amber-400">
-                          In qualità di organizzatore puoi comunque procedere e confermare questo orario a tua piena discrezione.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg text-[11px] text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 font-semibold">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <span>Tutti i membri essenziali sono presenti per questo slot!</span>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="p-2.5 bg-neutral-100/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 rounded-lg text-[11px] text-neutral-700 dark:text-neutral-300 flex items-center gap-2">
-                    <Calendar className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />
-                    <span>
-                      Data o orario personalizzato (non presente tra le opzioni del sondaggio). Puoi confermarlo liberamente.
-                    </span>
+                {/* Feedback presenza dello slot scelto */}
+                {isAnyMandatoryMissingInForm ? (
+                  <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-[11px] text-amber-900 dark:text-amber-200 space-y-1">
+                    <div className="flex items-center gap-1 font-bold text-amber-800 dark:text-amber-300">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>Membri essenziali assenti in questo orario:</span>
+                    </div>
+                    <p className="text-[10px] text-amber-800 dark:text-amber-300 font-semibold">
+                      {formMissingMandatory.map((u) => `${u.name} ${u.surname}`).join(', ')}
+                    </p>
+                    <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                      In qualità di organizzatore puoi comunque procedere e confermare questo orario a tua piena discrezione.
+                    </p>
                   </div>
-                )}
-
-                {selectedFinalStartTime && selectedFinalEndTime && selectedFinalStartTime >= selectedFinalEndTime && (
-                  <div className="p-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-lg text-[11px] text-red-700 dark:text-red-300 flex items-center gap-1.5 font-semibold">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                    <span>L&apos;ora di fine deve essere successiva all&apos;ora di inizio.</span>
+                ) : (
+                  <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg text-[11px] text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span>Tutti i membri essenziali sono presenti per questo slot!</span>
                   </div>
                 )}
 
                 {/* Bottone di Conferma Definitiva */}
                 <button
                   type="button"
-                  disabled={isCustomTimeRangeInvalid}
                   onClick={handleExecuteConfirmation}
-                  className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer ${
                     isAnyMandatoryMissingInForm
                       ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/30'
                       : 'bg-red-600 hover:bg-red-500 text-white shadow-red-600/30'
@@ -946,9 +908,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                 >
                   <Check className="w-4 h-4 stroke-[2.5px]" />
                   <span>
-                    {selectedFinalDate && selectedFinalStartTime && selectedFinalEndTime
-                      ? `Conferma Meeting (${formatDateShort(selectedFinalDate)} · ${selectedFinalStartTime} - ${selectedFinalEndTime})`
-                      : 'Seleziona data e orario per confermare'}
+                    Conferma Meeting ({formatDateShort(selectedFinalDate)} · {selectedFinalStartTime} - {selectedFinalEndTime})
                   </span>
                 </button>
               </div>
