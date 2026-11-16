@@ -10,8 +10,9 @@
  * 5. Sincronizzazione agenda e logout sicuro.
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { AppRole, User, UserSystemRole, Group } from '../types';
+import { useGoogleLogin } from '@react-oauth/google';
 import {
   Mail,
   Calendar,
@@ -28,6 +29,8 @@ import {
   X,
   Users,
   FileText,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { ImageCropModal } from './ImageCropModal';
 import { UserAvatar } from './UserAvatar';
@@ -41,6 +44,7 @@ interface ProfileViewProps {
   onLogout: () => void;
   onUpdateUserRole?: (targetUserId: string, newRole: AppRole) => void;
   onUpdateUserProfile?: (updates: Partial<User>) => void;
+  onConnectGoogleCalendar?: (code: string, grantedScope?: string) => Promise<void>;
   onNavigateToPrivacy?: () => void;
   onNavigateToTerms?: () => void;
 }
@@ -55,15 +59,60 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onLogout,
   onUpdateUserRole,
   onUpdateUserProfile,
+  onConnectGoogleCalendar,
   onNavigateToPrivacy,
   onNavigateToTerms,
 }) => {
   const [calendarConnected, setCalendarConnected] = useState(
-    currentUser.googleCalendarConnected ?? true
+    currentUser.googleCalendarConnected ?? false
   );
+  const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const [isAvatarMenuOpen, setIsAvatarMenuOpen] = useState(false);
   const [cropImageSource, setCropImageSource] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCalendarConnected(Boolean(currentUser.googleCalendarConnected));
+  }, [currentUser.googleCalendarConnected]);
+
+  const hasCalendarAuth = Boolean(
+    currentUser.hasGoogleCalendarAuth ||
+      currentUser.hasGoogleRefreshToken ||
+      currentUser.googleAccessToken
+  );
+
+  const connectGoogleCalendar = useGoogleLogin({
+    flow: 'auth-code',
+    scope: 'https://www.googleapis.com/auth/calendar.events.owned',
+    select_account: true,
+    onSuccess: async (codeResponse) => {
+      if (!codeResponse.code) {
+        setIsConnectingCalendar(false);
+        return;
+      }
+      try {
+        if (onConnectGoogleCalendar) {
+          await onConnectGoogleCalendar(codeResponse.code, codeResponse.scope);
+          setCalendarConnected(true);
+          showNotification('Google Calendar collegato con successo!');
+        }
+      } catch (err: any) {
+        showNotification(err?.message || 'Errore durante il collegamento con Google Calendar.');
+      } finally {
+        setIsConnectingCalendar(false);
+      }
+    },
+    onError: () => {
+      setIsConnectingCalendar(false);
+      showNotification('Autorizzazione Google Calendar non completata o annullata.');
+    },
+    onNonOAuthError: (nonOAuthErr) => {
+      setIsConnectingCalendar(false);
+      if (nonOAuthErr.type === 'popup_failed_to_open') {
+        showNotification('Popup Google bloccato dal browser. Consenti i popup e riprova.');
+      }
+    },
+  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -384,7 +433,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         )}
       </div>
 
-      {/* Sincronizzazione Google Calendar (Sempre Collegato) */}
+      {/* Sincronizzazione Google Calendar */}
       <div className="bg-white dark:bg-neutral-900 rounded-3xl p-4 sm:p-5 border border-neutral-200/90 dark:border-neutral-800 shadow-xs space-y-3.5 transition-colors">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
@@ -397,11 +446,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   Google Calendar Sincronizzato
                 </h3>
                 <span className={`text-[8.5px] sm:text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${
-                  calendarConnected
+                  calendarConnected && hasCalendarAuth
                     ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400'
                     : 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400'
                 }`}>
-                  {calendarConnected ? 'Sempre Collegato' : 'Disattivato'}
+                  {calendarConnected && hasCalendarAuth
+                    ? 'Collegato'
+                    : hasCalendarAuth
+                    ? 'Disattivato'
+                    : 'Da Autorizzare'}
                 </span>
               </div>
               <p className="text-[10px] sm:text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 font-mono truncate">
@@ -416,34 +469,86 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             aria-checked={calendarConnected}
             onClick={() => {
               const nextState = !calendarConnected;
+              if (nextState && !hasCalendarAuth && onConnectGoogleCalendar) {
+                setIsConnectingCalendar(true);
+                connectGoogleCalendar();
+                return;
+              }
               setCalendarConnected(nextState);
               onUpdateUserProfile?.({ googleCalendarConnected: nextState });
-              setFeedbackMsg(
+              showNotification(
                 nextState
                   ? 'Sincronizzazione automatica con Google Calendar attivata!'
                   : 'Sincronizzazione Google Calendar disattivata.'
               );
-              setTimeout(() => setFeedbackMsg(null), 3000);
             }}
             className={`w-11 h-6 rounded-full transition-colors relative p-0.5 cursor-pointer shrink-0 focus:outline-none focus:ring-2 focus:ring-red-500/40 select-none ${
-              calendarConnected ? 'bg-[#f23e2e]' : 'bg-neutral-300 dark:bg-neutral-700'
+              calendarConnected && hasCalendarAuth ? 'bg-[#f23e2e]' : 'bg-neutral-300 dark:bg-neutral-700'
             }`}
             title="Attiva/disattiva sincronizzazione automatica Google Calendar"
           >
             <div
               className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${
-                calendarConnected ? 'translate-x-5' : 'translate-x-0'
+                calendarConnected && hasCalendarAuth ? 'translate-x-5' : 'translate-x-0'
               }`}
             />
           </button>
         </div>
 
-        <div className="p-3 sm:p-3.5 bg-neutral-50 dark:bg-neutral-800/60 rounded-2xl border border-neutral-100 dark:border-neutral-800 text-xs text-neutral-600 dark:text-neutral-300 flex items-center gap-2.5">
-          <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-          <p className="text-[11px] sm:text-xs font-medium text-neutral-700 dark:text-neutral-200 leading-relaxed">
-            Ogni evento viene inserito automaticamente nel Google Calendar di <span className="font-mono text-neutral-900 dark:text-white font-bold break-all">{currentUser.email}</span>.
-          </p>
-        </div>
+        {hasCalendarAuth ? (
+          <div className="p-3 sm:p-3.5 bg-neutral-50 dark:bg-neutral-800/60 rounded-2xl border border-neutral-100 dark:border-neutral-800 space-y-2.5">
+            <div className="text-xs text-neutral-600 dark:text-neutral-300 flex items-center gap-2.5">
+              <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <p className="text-[11px] sm:text-xs font-medium text-neutral-700 dark:text-neutral-200 leading-relaxed">
+                {calendarConnected
+                  ? <>Ogni evento viene inserito automaticamente nel Google Calendar di <span className="font-mono text-neutral-900 dark:text-white font-bold break-all">{currentUser.email}</span>.</>
+                  : 'La sincronizzazione è al momento disattivata. Attiva lo switch sopra per riprendere.'}
+              </p>
+            </div>
+            {!currentUser.hasGoogleRefreshToken && onConnectGoogleCalendar && (
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-neutral-200/70 dark:border-neutral-700/60">
+                <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                  Sessione temporanea: ricollega per abilitare il rinnovo automatico offline.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsConnectingCalendar(true);
+                    connectGoogleCalendar();
+                  }}
+                  disabled={isConnectingCalendar}
+                  className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-[10px] font-bold text-neutral-800 dark:text-neutral-100 hover:border-[#f23e2e] flex items-center gap-1 cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isConnectingCalendar ? 'animate-spin' : ''}`} />
+                  <span>{isConnectingCalendar ? 'Collegamento...' : 'Ricollega'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="p-3 sm:p-3.5 bg-amber-50/70 dark:bg-amber-950/30 rounded-2xl border border-amber-200/80 dark:border-amber-900/50 space-y-2.5">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-[11px] sm:text-xs font-medium text-amber-900 dark:text-amber-200 leading-relaxed">
+                Google Calendar non risulta ancora autorizzato su questo profilo. Collega il tuo account Google concedendo il permesso sul calendario.
+              </p>
+            </div>
+            {onConnectGoogleCalendar && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsConnectingCalendar(true);
+                  connectGoogleCalendar();
+                }}
+                disabled={isConnectingCalendar}
+                className="w-full py-2 px-3 bg-[#f23e2e] hover:bg-red-600 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>{isConnectingCalendar ? 'Autorizzazione in corso...' : 'Collega Google Calendar'}</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Scheda Gestione Notifiche Push Reali (Stile WhatsApp) */}

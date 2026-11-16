@@ -8,27 +8,45 @@
 
 import { google } from 'googleapis';
 
-const GOOGLE_CLIENT_ID =
-  process.env.GOOGLE_CLIENT_ID ||
-  process.env.VITE_GOOGLE_CLIENT_ID ||
-  '';
-
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-
 /**
  * Inizializza l'OAuth2Client di Google per la creazione di eventi
+ * Leggendo le env vars dinamicamente per evitare problemi di ordine di import ESM prima di dotenv.config().
  */
-export function getOAuth2Client(refreshToken?: string) {
+export function getOAuth2Client(
+  refreshTokenOrTokens?:
+    | string
+    | {
+        refreshToken?: string;
+        accessToken?: string;
+        googleRefreshToken?: string;
+        googleAccessToken?: string;
+      }
+) {
+  const clientId =
+    process.env.GOOGLE_CLIENT_ID ||
+    process.env.VITE_GOOGLE_CLIENT_ID ||
+    '';
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+
   const oauth2Client = new google.auth.OAuth2(
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
+    clientId,
+    clientSecret,
     'postmessage'
   );
 
-  if (refreshToken) {
+  if (typeof refreshTokenOrTokens === 'string') {
     oauth2Client.setCredentials({
-      refresh_token: refreshToken,
+      refresh_token: refreshTokenOrTokens,
     });
+  } else if (refreshTokenOrTokens) {
+    const rToken = refreshTokenOrTokens.refreshToken || refreshTokenOrTokens.googleRefreshToken;
+    const aToken = refreshTokenOrTokens.accessToken || refreshTokenOrTokens.googleAccessToken;
+    const creds: Record<string, string> = {};
+    if (rToken) creds.refresh_token = rToken;
+    if (aToken) creds.access_token = aToken;
+    if (Object.keys(creds).length > 0) {
+      oauth2Client.setCredentials(creds);
+    }
   }
 
   return oauth2Client;
@@ -111,24 +129,22 @@ export async function createGoogleCalendarEvent(
     attendeeEmails = [],
   } = params;
 
-  const actualToken = googleRefreshToken || refreshToken;
+  const actualRefreshToken = googleRefreshToken || refreshToken;
+  const actualAccessToken = params.accessToken;
 
-  if (!actualToken) {
+  if (!actualRefreshToken && !actualAccessToken) {
     console.warn("Token Google assente, evento non inserito in Calendar");
     return {
       success: false,
-      error: 'Google Refresh Token non presente',
+      error: 'Token Google (refresh_token o access_token) non presente',
     };
   }
 
   try {
-    const oauth2Client = getOAuth2Client(actualToken);
-    if (params.accessToken) {
-      oauth2Client.setCredentials({
-        access_token: params.accessToken,
-        ...(actualToken ? { refresh_token: actualToken } : {}),
-      });
-    }
+    const oauth2Client = getOAuth2Client({
+      refreshToken: actualRefreshToken,
+      accessToken: actualAccessToken,
+    });
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
     // Format RFC3339 con offset Europe/Rome esatto per evitare slittamento di 1 ora
@@ -331,12 +347,30 @@ export async function updateGoogleCalendarEvent(
  * Elimina definitivamente un evento da Google Calendar tramite googleEventId.
  */
 export async function deleteGoogleCalendarEvent(
-  refreshToken: string | undefined,
+  refreshTokenOrTokens:
+    | string
+    | {
+        refreshToken?: string;
+        accessToken?: string;
+        googleRefreshToken?: string;
+        googleAccessToken?: string;
+      }
+    | undefined,
   googleEventId: string
 ): Promise<{ success: boolean; error?: string }> {
-  if (!refreshToken) {
+  let refreshToken: string | undefined;
+  let accessToken: string | undefined;
+
+  if (typeof refreshTokenOrTokens === 'string') {
+    refreshToken = refreshTokenOrTokens;
+  } else if (refreshTokenOrTokens) {
+    refreshToken = refreshTokenOrTokens.refreshToken || refreshTokenOrTokens.googleRefreshToken;
+    accessToken = refreshTokenOrTokens.accessToken || refreshTokenOrTokens.googleAccessToken;
+  }
+
+  if (!refreshToken && !accessToken) {
     console.warn("Token Google assente, evento non cancellato da Calendar");
-    return { success: false, error: 'Google Refresh Token non presente' };
+    return { success: false, error: 'Token Google non presente' };
   }
 
   if (!googleEventId) {
@@ -345,7 +379,7 @@ export async function deleteGoogleCalendarEvent(
   }
 
   try {
-    const oauth2Client = getOAuth2Client(refreshToken);
+    const oauth2Client = getOAuth2Client({ refreshToken, accessToken });
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
     await calendar.events.delete({

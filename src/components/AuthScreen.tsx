@@ -34,7 +34,7 @@ interface AuthScreenProps {
   registeredUsers: User[];
   onLogin: (user: User) => void;
   onRegister: (newUser: Omit<User, 'id'>) => void;
-  onGoogleAuthCode?: (code: string) => Promise<void>;
+  onGoogleAuthCode?: (code: string, grantedScope?: string) => Promise<void>;
   onOpenPublicBooking?: () => void;
   pendingInviteCode?: string | null;
   onOpenPrivacy?: () => void;
@@ -87,6 +87,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const loginWithGoogle = useGoogleLogin({
     flow: 'auth-code',
     scope: 'https://www.googleapis.com/auth/calendar.events.owned',
+    select_account: true,
     onSuccess: async (codeResponse) => {
       if (codeResponse.code) {
         setErrorMsg(null);
@@ -94,7 +95,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         setIsGoogleLoading(true);
         try {
           if (onGoogleAuthCode) {
-            await onGoogleAuthCode(codeResponse.code);
+            await onGoogleAuthCode(codeResponse.code, codeResponse.scope);
           }
         } catch (err: any) {
           console.warn('Errore login Google:', err);
@@ -108,6 +109,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       console.warn('Errore autorizzazione Google:', errorResponse);
       setIsGoogleLoading(false);
       setErrorMsg('Accesso con Google non completato o annullato.');
+    },
+    onNonOAuthError: (nonOAuthErr) => {
+      console.warn('Finestra Google chiusa o bloccata:', nonOAuthErr);
+      setIsGoogleLoading(false);
+      if (nonOAuthErr.type === 'popup_failed_to_open') {
+        setErrorMsg('Il popup di Google è stato bloccato dal browser. Consenti i popup per questo sito e riprova.');
+      }
     },
   });
 

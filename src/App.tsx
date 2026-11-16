@@ -924,12 +924,12 @@ export default function App() {
   }, [currentUser, userPendingPassword]);
 
   // Accesso e Sincronizzazione con il vero Google OAuth2 (Authorization Code con permessi Google Calendar)
-  const handleGoogleAuthCode = async (code: string) => {
+  const handleGoogleAuthCode = async (code: string, grantedScope?: string) => {
     try {
       const res = await fetch('/api/users/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, grantedScope }),
       });
 
       if (res.ok) {
@@ -937,7 +937,7 @@ export default function App() {
         if (data.user) {
           const authUser: User = {
             ...data.user,
-            googleCalendarConnected: true,
+            googleCalendarConnected: Boolean(data.user.googleCalendarConnected),
           };
           setUsers((prev) => [
             ...prev.filter(
@@ -963,6 +963,40 @@ export default function App() {
       console.warn('[handleGoogleAuthCode error]', e);
       throw e;
     }
+  };
+
+  // Collegamento / Ricollegamento Google Calendar dal Profilo dell'utente già autenticato
+  const handleConnectGoogleCalendar = async (code: string, grantedScope?: string) => {
+    if (!currentUser) return;
+    const res = await fetch('/api/users/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code,
+        grantedScope,
+        linkToUserId: currentUser.id,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.user) {
+      throw new Error(data.error || 'Impossibile completare il collegamento con Google Calendar.');
+    }
+
+    if (data.calendarScopeGranted === false) {
+      throw new Error(
+        'Permesso Google Calendar non concesso nella schermata Google. Spunta la casella relativa al calendario quando autorizzi l\'accesso.'
+      );
+    }
+
+    const updatedUser: User = {
+      ...currentUser,
+      ...data.user,
+    };
+    setCurrentUser(updatedUser);
+    setUsers((prev) =>
+      prev.map((u) => (u.id === updatedUser.id ? { ...u, ...updatedUser } : u))
+    );
   };
 
   const handleLogout = () => {
@@ -1011,12 +1045,18 @@ export default function App() {
       .catch((e) => console.log('[API user role update]', e));
   };
 
-  // Aggiornamento Profilo Utente (foto avatar, Google Calendar)
+  // Aggiornamento Profilo Utente (foto avatar, Google Calendar) con persistenza su MongoDB
   const handleUpdateUserProfile = (updates: Partial<User>) => {
     if (!currentUser) return;
     const updated = { ...currentUser, ...updates };
     setCurrentUser(updated);
     setUsers((prev) => prev.map((u) => (u.id === currentUser.id ? updated : u)));
+
+    fetch(`/api/users/${currentUser.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch((e) => console.log('[API profile update sync]', e));
   };
 
   // Pre-caricamento silenzioso e istantaneo in background di TUTTI i gruppi dell'utente appena carica la lista o effettua l'accesso
@@ -1693,8 +1733,14 @@ export default function App() {
 
     fetch('/api/events', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newMeetingEvent),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentUser.googleAccessToken ? { Authorization: `Bearer ${currentUser.googleAccessToken}` } : {}),
+      },
+      body: JSON.stringify({
+        ...newMeetingEvent,
+        googleAccessToken: currentUser.googleAccessToken,
+      }),
     }).catch((e) => console.log('[API create poll sync]', e));
   };
 
@@ -1705,8 +1751,15 @@ export default function App() {
 
     fetch(`/api/events/${updatedEvent.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedEvent),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentUser?.googleAccessToken ? { Authorization: `Bearer ${currentUser.googleAccessToken}` } : {}),
+      },
+      body: JSON.stringify({
+        ...updatedEvent,
+        userId: currentUser?.id,
+        googleAccessToken: currentUser?.googleAccessToken,
+      }),
     }).catch((e) => console.log('[API update poll sync]', e));
   };
 
@@ -1950,7 +2003,9 @@ export default function App() {
         body: JSON.stringify({
           status: 'confirmed',
           finalizedSlot: finalSlot,
+          userId: currentUser.id,
           googleAccessToken: currentUser.googleAccessToken,
+          googleRefreshToken: currentUser.googleRefreshToken,
         }),
       })
         .then((res) => (res.ok ? res.json() : null))
@@ -2269,6 +2324,7 @@ export default function App() {
                     onLogout={handleLogout}
                     onUpdateUserRole={handleUpdateUserRole}
                     onUpdateUserProfile={handleUpdateUserProfile}
+                    onConnectGoogleCalendar={handleConnectGoogleCalendar}
                     onNavigateToPrivacy={navigateToPrivacy}
                     onNavigateToTerms={navigateToTerms}
                   />
@@ -2396,6 +2452,7 @@ export default function App() {
                     onLogout={handleLogout}
                     onUpdateUserRole={handleUpdateUserRole}
                     onUpdateUserProfile={handleUpdateUserProfile}
+                    onConnectGoogleCalendar={handleConnectGoogleCalendar}
                     onNavigateToPrivacy={navigateToPrivacy}
                     onNavigateToTerms={navigateToTerms}
                   />

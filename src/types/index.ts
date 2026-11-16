@@ -27,6 +27,8 @@ export interface User {
   googleAccessToken?: string;
   googleRefreshToken?: string;
   googleCalendarConnected?: boolean;
+  hasGoogleRefreshToken?: boolean;
+  hasGoogleCalendarAuth?: boolean;
 }
 
 export type GroupMemberRole = 'member' | 'admin' | 'admin_clienti' | 'responsabile';

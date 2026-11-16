@@ -320,6 +320,10 @@ app.get('/api/users', async (_req: Request, res: Response) => {
       email: u.email,
       avatarUrl: u.avatarUrl || null,
       googleCalendarConnected: Boolean(u.googleCalendarConnected),
+      hasGoogleRefreshToken: Boolean(u.googleRefreshToken),
+      hasGoogleCalendarAuth: Boolean(
+        u.googleRefreshToken || (u.googleAccessToken && u.googleCalendarConnected)
+      ),
       hasPassword: Boolean(u.password && String(u.password).trim().length > 0),
       groupMemberships: u.groupMemberships || [],
       createdAt: u.createdAt,
@@ -342,6 +346,8 @@ const handleUserSync = async (req: Request, res: Response) => {
     const {
       code, // Authorization Code restituito da useGoogleLogin (flow: 'auth-code')
       credential, // JWT ID Token restituito da @react-oauth/google (alternativo)
+      grantedScope, // Scope restituito dal client nella CodeResponse
+      linkToUserId, // Opzionale: ID utente esistente a cui collegare Google Calendar dal Profilo
       id,
       name,
       surname,
@@ -363,6 +369,8 @@ const handleUserSync = async (req: Request, res: Response) => {
     let extractedAvatar = avatarUrl || null;
     let actualAccessToken = googleAccessToken || null;
     let actualRefreshToken = googleRefreshToken || null;
+    let codeExchanged = false;
+    let grantedCalendarScope = false;
 
     // 1. Scambio dell'Authorization Code con token reali Google (flow: 'auth-code')
     // REGOLA CRITICA: redirect_uri deve essere 'postmessage' per evitare redirect_uri_mismatch
@@ -373,12 +381,26 @@ const handleUserSync = async (req: Request, res: Response) => {
           redirect_uri: 'postmessage',
         });
         const tokens = tokenResponse.tokens;
+        codeExchanged = true;
+
         if (tokens.access_token) {
           actualAccessToken = tokens.access_token;
         }
         if (tokens.refresh_token) {
           actualRefreshToken = tokens.refresh_token;
         }
+
+        const effectiveScopeStr = String(tokens.scope || grantedScope || '');
+        grantedCalendarScope =
+          effectiveScopeStr.includes('calendar') ||
+          Boolean(tokens.refresh_token);
+
+        if (!tokens.refresh_token) {
+          console.warn(
+            `[Google OAuth2] getToken completato senza refresh_token (scope: "${effectiveScopeStr}"). Verrà usato access_token.`
+          );
+        }
+
         if (tokens.id_token) {
           try {
             const ticket = await oAuth2Client.verifyIdToken({
@@ -406,8 +428,38 @@ const handleUserSync = async (req: Request, res: Response) => {
             }
           }
         }
+
+        // Fallback con Google UserInfo API se id_token non è presente o privo di email
+        if (!cleanEmail && actualAccessToken) {
+          try {
+            const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${actualAccessToken}` },
+            });
+            if (userInfoRes.ok) {
+              const userInfo: any = await userInfoRes.json();
+              if (userInfo?.email) {
+                cleanEmail = String(userInfo.email).toLowerCase().trim();
+                extractedName = userInfo.given_name || userInfo.name?.split(' ')[0] || cleanEmail.split('@')[0];
+                extractedSurname = userInfo.family_name || userInfo.name?.split(' ').slice(1).join(' ') || 'JESic';
+                extractedAvatar = userInfo.picture || extractedAvatar;
+              }
+            }
+          } catch (uiErr: any) {
+            console.warn('[Google OAuth2] Fallback userinfo fallito:', uiErr?.message || uiErr);
+          }
+        }
       } catch (tokenErr: any) {
-        console.error('Errore scambio code OAuth2 Google (redirect_uri: postmessage):', tokenErr.message);
+        const gErrDetail =
+          tokenErr?.response?.data?.error_description ||
+          tokenErr?.response?.data?.error ||
+          tokenErr?.message ||
+          'Errore scambio codice Google';
+        console.error('Errore scambio code OAuth2 Google (redirect_uri: postmessage):', gErrDetail);
+        if (!cleanEmail) {
+          return res.status(401).json({
+            error: `Impossibile completare l'autenticazione Google (${gErrDetail}). Verifica che il Client ID/Secret Google siano configurati correttamente.`,
+          });
+        }
       }
     }
 
@@ -446,20 +498,32 @@ const handleUserSync = async (req: Request, res: Response) => {
       }
     }
 
-    if (!cleanEmail) {
+    if (!cleanEmail && !linkToUserId) {
       return res.status(400).json({ error: 'Email obbligatoria per la registrazione/sincronizzazione' });
     }
 
-    const defaultName = extractedName || cleanEmail.split('@')[0]?.split('.')[0] || 'Utente';
-    const defaultSurname = extractedSurname || cleanEmail.split('@')[0]?.split('.')[1] || 'JESic';
+    const defaultName = extractedName || (cleanEmail ? cleanEmail.split('@')[0]?.split('.')[0] : '') || 'Utente';
+    const defaultSurname = extractedSurname || (cleanEmail ? cleanEmail.split('@')[0]?.split('.')[1] : '') || 'JESic';
 
-    // Cerca l'utente SOLO tramite email nel database MongoDB
-    let existing = await UserModel.findOne({ email: cleanEmail });
+    // Cerca l'utente tramite linkToUserId (se sta collegando Google Calendar dal profilo) oppure tramite email
+    let existing = linkToUserId
+      ? await UserModel.findOne({ $or: [{ _id: linkToUserId }, { id: linkToUserId }] })
+      : null;
+
+    if (!existing && cleanEmail) {
+      existing = await UserModel.findOne({ email: cleanEmail });
+    }
+
+    const hasNewCalendarGrant = Boolean(
+      actualRefreshToken || (actualAccessToken && (grantedCalendarScope || !codeExchanged))
+    );
 
     if (existing) {
-      if (defaultName && (!existing.name || existing.name === 'Utente')) existing.name = defaultName;
-      if (defaultSurname && (!existing.surname || existing.surname === 'JESic')) existing.surname = defaultSurname;
-      if (extractedAvatar && !existing.avatarUrl) existing.avatarUrl = extractedAvatar;
+      if (!linkToUserId) {
+        if (defaultName && (!existing.name || existing.name === 'Utente')) existing.name = defaultName;
+        if (defaultSurname && (!existing.surname || existing.surname === 'JESic')) existing.surname = defaultSurname;
+        if (extractedAvatar && !existing.avatarUrl) existing.avatarUrl = extractedAvatar;
+      }
       if (password && typeof password === 'string' && password.trim().length > 0) {
         if (!existing.password || existing.password.trim() === '') {
           existing.password = password.trim();
@@ -469,8 +533,12 @@ const handleUserSync = async (req: Request, res: Response) => {
       if (actualRefreshToken) {
         existing.googleRefreshToken = actualRefreshToken;
         existing.googleCalendarConnected = true;
+      } else if (hasNewCalendarGrant) {
+        existing.googleCalendarConnected = true;
       } else if (existing.googleRefreshToken) {
         existing.googleCalendarConnected = true;
+      } else if (codeExchanged && !grantedCalendarScope) {
+        existing.googleCalendarConnected = false;
       }
       if (googleCalendarConnected !== undefined) existing.googleCalendarConnected = Boolean(googleCalendarConnected);
       if (!existing.groupMemberships) {
@@ -479,6 +547,10 @@ const handleUserSync = async (req: Request, res: Response) => {
 
       await existing.save();
 
+      const hasCalendarAuth = Boolean(
+        existing.googleRefreshToken || (existing.googleAccessToken && existing.googleCalendarConnected)
+      );
+
       const jsonUser = {
         id: existing._id || existing.id,
         name: existing.name,
@@ -486,13 +558,22 @@ const handleUserSync = async (req: Request, res: Response) => {
         email: existing.email,
         avatarUrl: existing.avatarUrl || null,
         googleCalendarConnected: Boolean(existing.googleCalendarConnected),
+        googleAccessToken: existing.googleAccessToken || undefined,
+        hasGoogleRefreshToken: Boolean(existing.googleRefreshToken),
+        hasGoogleCalendarAuth: hasCalendarAuth,
         hasPassword: Boolean(existing.password && String(existing.password).trim().length > 0),
         groupMemberships: existing.groupMemberships || [],
       };
-      return res.json({ user: jsonUser });
+      return res.json({ user: jsonUser, calendarScopeGranted: hasNewCalendarGrant || Boolean(existing.googleRefreshToken) });
     }
 
     // REGOLA: Il nuovo utente viene creato con nome, cognome, email, avatarUrl, eventuale password, credenziali Google e groupMemberships vuoto.
+    const initialCalendarConnected = hasNewCalendarGrant
+      ? true
+      : googleCalendarConnected !== undefined
+      ? Boolean(googleCalendarConnected)
+      : false;
+
     const newUserDoc = new UserModel({
       _id: id || `user-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: defaultName,
@@ -500,7 +581,7 @@ const handleUserSync = async (req: Request, res: Response) => {
       email: cleanEmail,
       password: (password && typeof password === 'string') ? password.trim() : '',
       avatarUrl: extractedAvatar || null,
-      googleCalendarConnected: actualRefreshToken ? true : googleCalendarConnected !== undefined ? Boolean(googleCalendarConnected) : false,
+      googleCalendarConnected: initialCalendarConnected,
       googleAccessToken: actualAccessToken || null,
       googleRefreshToken: actualRefreshToken || null,
       groupMemberships: [],
@@ -514,11 +595,16 @@ const handleUserSync = async (req: Request, res: Response) => {
       email: newUserDoc.email,
       avatarUrl: newUserDoc.avatarUrl,
       googleCalendarConnected: Boolean(newUserDoc.googleCalendarConnected),
+      googleAccessToken: newUserDoc.googleAccessToken || undefined,
+      hasGoogleRefreshToken: Boolean(newUserDoc.googleRefreshToken),
+      hasGoogleCalendarAuth: Boolean(
+        newUserDoc.googleRefreshToken || (newUserDoc.googleAccessToken && newUserDoc.googleCalendarConnected)
+      ),
       hasPassword: Boolean(newUserDoc.password && String(newUserDoc.password).trim().length > 0),
       groupMemberships: newUserDoc.groupMemberships || [],
     };
 
-    return res.status(201).json({ user: jsonUser });
+    return res.status(201).json({ user: jsonUser, calendarScopeGranted: hasNewCalendarGrant });
   } catch (err: any) {
     console.error('Errore salvataggio UserModel MongoDB:', err.message);
     return res.status(500).json({ error: 'Errore durante la registrazione dell\'utente in MongoDB' });
@@ -564,6 +650,11 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       email: user.email,
       avatarUrl: user.avatarUrl || null,
       googleCalendarConnected: Boolean(user.googleCalendarConnected),
+      googleAccessToken: user.googleAccessToken || undefined,
+      hasGoogleRefreshToken: Boolean(user.googleRefreshToken),
+      hasGoogleCalendarAuth: Boolean(
+        user.googleRefreshToken || (user.googleAccessToken && user.googleCalendarConnected)
+      ),
       hasPassword: true,
       groupMemberships: user.groupMemberships || [],
     };
@@ -607,6 +698,11 @@ app.post('/api/users/set-password', async (req: Request, res: Response) => {
       email: user.email,
       avatarUrl: user.avatarUrl || null,
       googleCalendarConnected: Boolean(user.googleCalendarConnected),
+      googleAccessToken: user.googleAccessToken || undefined,
+      hasGoogleRefreshToken: Boolean(user.googleRefreshToken),
+      hasGoogleCalendarAuth: Boolean(
+        user.googleRefreshToken || (user.googleAccessToken && user.googleCalendarConnected)
+      ),
       hasPassword: true,
       groupMemberships: user.groupMemberships || [],
     };
@@ -939,6 +1035,10 @@ app.patch('/api/users/:id', async (req: Request, res: Response) => {
         googleCalendarConnected: updatedUser.googleCalendarConnected,
         googleAccessToken: updatedUser.googleAccessToken || undefined,
         googleRefreshToken: updatedUser.googleRefreshToken || undefined,
+        hasGoogleRefreshToken: Boolean(updatedUser.googleRefreshToken),
+        hasGoogleCalendarAuth: Boolean(
+          updatedUser.googleRefreshToken || (updatedUser.googleAccessToken && updatedUser.googleCalendarConnected)
+        ),
       },
     });
   } catch (err: any) {
@@ -2806,6 +2906,7 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   const updates = req.body;
 
   try {
+    let justCreatedGoogleEvent = false;
     // AUTOMAZIONE SILENTE GOOGLE CALENDAR & MEET LATO BACKEND
     // Nel momento esatto in cui un sondaggio viene finalizzato/confermato
     if (updates.status === 'confirmed' && updates.finalizedSlot) {
@@ -2879,6 +2980,7 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
               if (calRes?.eventId) {
                 updates.googleEventId = calRes.eventId;
                 updates.googleCalendarEventId = calRes.eventId;
+                justCreatedGoogleEvent = true;
               }
             } catch (calErr: any) {
               console.warn("Token Google assente, evento non inserito in Calendar", calErr?.message || calErr);
@@ -2902,9 +3004,9 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     }
 
     // SINCRONIZZAZIONE MODIFICA GOOGLE CALENDAR
-    // Verifica se l'utente loggato ha un googleRefreshToken e se l'evento ha un googleEventId
+    // Verifica se l'utente loggato ha un token Google e se l'evento ha un googleEventId (evitando doppio patch se appena creato)
     const targetGoogleEventId = updated.googleEventId || updated.googleCalendarEventId;
-    if (targetGoogleEventId) {
+    if (targetGoogleEventId && !justCreatedGoogleEvent) {
       try {
         const requesterId =
           req.body?.userId ||
@@ -2921,7 +3023,13 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
           updates.googleRefreshToken ||
           loggedInUser?.googleRefreshToken;
 
-        if (refreshToken) {
+        const accessToken =
+          req.headers.authorization?.replace('Bearer ', '') ||
+          req.body?.googleAccessToken ||
+          updates.googleAccessToken ||
+          loggedInUser?.googleAccessToken;
+
+        if (refreshToken || accessToken) {
           const eventDate =
             updated.finalizedSlot?.date ||
             (updated.dates && updated.dates[0]) ||
@@ -2933,7 +3041,7 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
             updated.finalizedSlot?.endTime ||
             (updated.endHour ? `${String(updated.endHour).padStart(2, '0')}:00` : '10:00');
 
-          await updateGoogleCalendarEvent(refreshToken, targetGoogleEventId, {
+          await updateGoogleCalendarEvent({ refreshToken, accessToken }, targetGoogleEventId, {
             title: updated.title,
             description: updated.description,
             date: eventDate,
@@ -3022,8 +3130,13 @@ const handleDeleteEventOrPoll = async (req: Request, res: Response) => {
           (req.query?.googleRefreshToken as string) ||
           user?.googleRefreshToken;
 
-        if (refreshToken) {
-          await deleteGoogleCalendarEvent(refreshToken, targetGoogleEventId);
+        const accessToken =
+          req.headers.authorization?.replace('Bearer ', '') ||
+          req.body?.googleAccessToken ||
+          user?.googleAccessToken;
+
+        if (refreshToken || accessToken) {
+          await deleteGoogleCalendarEvent({ refreshToken, accessToken }, targetGoogleEventId);
           console.log(`[Google Calendar] Evento ${targetGoogleEventId} rimosso con successo.`);
         } else {
           console.warn("Token Google assente, evento non cancellato da Calendar");
