@@ -369,7 +369,7 @@ export const Group: Model<IGroup> = GroupModel;
 /* ==========================================================================
    4. CLIENT REQUEST SCHEMA & MODEL (Richieste Clienti B2B)
    ========================================================================== */
-export type ClientRequestStatus = 'pending' | 'converted_to_poll' | 'confirmed' | 'archived';
+export type ClientRequestStatus = 'pending' | 'converted_to_poll' | 'confirmed' | 'rejected' | 'archived';
 
 export interface IClientSlotPreference {
   date: string;
@@ -394,6 +394,8 @@ export interface IClientRequest {
     endTime: string;
   };
   meetLink?: string | null;
+  rejectionReason?: string | null;
+  googleCalendarEvents?: IGoogleCalendarUserEvent[];
   emailConfirmationSentAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
@@ -443,7 +445,7 @@ const ClientRequestSchema: Schema<IClientRequest> = new Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'converted_to_poll', 'confirmed', 'archived'],
+      enum: ['pending', 'converted_to_poll', 'confirmed', 'rejected', 'archived'],
       default: 'pending',
       index: true,
     },
@@ -459,6 +461,20 @@ const ClientRequestSchema: Schema<IClientRequest> = new Schema(
     meetLink: {
       type: String,
       default: null,
+    },
+    rejectionReason: {
+      type: String,
+      default: null,
+    },
+    googleCalendarEvents: {
+      type: [
+        {
+          userId: { type: String, required: true },
+          googleEventId: { type: String, required: true },
+        },
+      ],
+      _id: false,
+      default: [],
     },
     emailConfirmationSentAt: {
       type: Date,

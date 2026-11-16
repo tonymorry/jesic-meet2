@@ -82,6 +82,10 @@ import {
   updateGoogleCalendarEvent,
   deleteGoogleCalendarEvent,
 } from './src/utils/googleCalendar';
+import {
+  generateClientConfirmationEmailHtml,
+  generateClientCancellationEmailHtml,
+} from './src/utils/emailTemplate';
 import { OAuth2Client } from 'google-auth-library';
 
 dotenv.config();
@@ -627,6 +631,15 @@ const handleUserSync = async (req: Request, res: Response) => {
       },
     });
 
+    // Invio email di benvenuto tramite Resend esclusivamente ai nuovi utenti registrati
+    sendWelcomeEmail({
+      name: jsonUser.name,
+      surname: jsonUser.surname,
+      email: jsonUser.email,
+    }).catch((welcomeErr: any) => {
+      console.warn('[Welcome Email] Errore asincrono invio benvenuto:', welcomeErr?.message || welcomeErr);
+    });
+
     return res.status(201).json({ user: jsonUser, calendarScopeGranted: hasNewCalendarGrant });
   } catch (err: any) {
     console.error('Errore salvataggio UserModel MongoDB:', err.message);
@@ -745,8 +758,200 @@ app.post('/api/users/set-password', async (req: Request, res: Response) => {
 const inMemoryResetCodes = new Map<string, { code: string; expires: number }>();
 
 /**
- * Invio email di recupero password tramite Resend API (HTTPS Porta 443)
- * Utilizza la porta standard HTTPS, ideale per Render (nessun blocco firewall né timeout)
+ * Helper generico di invio email tramite Resend API (HTTPS Porta 443)
+ * Utilizza il dominio verificato jesicmeet.it
+ */
+async function sendEmailViaResend(params: {
+  to: string | string[];
+  subject: string;
+  html: string;
+  text?: string;
+  replyTo?: string;
+  logTag?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { to, subject, html, text, replyTo, logTag = 'Resend Email' } = params;
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  if (!resendApiKey) {
+    return {
+      success: false,
+      error: "Servizio email non configurato. Inserisci la variabile RESEND_API_KEY nel pannello 'Environment' di Render (crea una chiave gratuita su resend.com).",
+    };
+  }
+
+  const recipients = (Array.isArray(to) ? to : [to])
+    .map((e) => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
+    .filter((e) => e.includes('@'));
+
+  if (recipients.length === 0) {
+    return { success: false, error: 'Nessun destinatario email valido.' };
+  }
+
+  try {
+    let rawFrom = process.env.RESEND_FROM?.trim();
+    if (!rawFrom || rawFrom.includes('resend.dev')) {
+      rawFrom = 'JESic Meet <info@jesicmeet.it>';
+    }
+
+    const sendersToTry: string[] = [];
+    const addSender = (s: string) => {
+      if (!sendersToTry.includes(s)) sendersToTry.push(s);
+    };
+
+    addSender(rawFrom);
+    addSender('JESic Meet <info@jesicmeet.it>');
+    addSender('JESic Meet <noreply@jesicmeet.it>');
+    addSender('JESic Meet <info@jesic.it>');
+
+    let lastErrorDetail = '';
+    for (const sender of sendersToTry) {
+      console.log(`[${logTag}] Invio Resend con mittente: ${sender} a ${recipients.join(', ')}...`);
+      const payload: Record<string, any> = {
+        from: sender,
+        to: recipients,
+        subject,
+        html,
+      };
+      if (text) payload.text = text;
+      if (replyTo && replyTo.includes('@')) payload.reply_to = replyTo.trim();
+
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data: any = await res.json().catch(() => ({}));
+      if (res.ok) {
+        console.log(`[${logTag}] Email inviata con successo via Resend da ${sender} a ${recipients.join(', ')}`);
+        return { success: true };
+      }
+
+      lastErrorDetail = data?.message || data?.error || (typeof data === 'string' ? data : `Errore HTTP ${res.status}`);
+      console.warn(`[${logTag}] Risposta non OK da Resend con mittente ${sender}:`, lastErrorDetail);
+
+      if (!lastErrorDetail.toLowerCase().includes('from') && !lastErrorDetail.toLowerCase().includes('domain') && !lastErrorDetail.toLowerCase().includes('testing emails')) {
+        break;
+      }
+    }
+
+    return {
+      success: false,
+      error: `Resend non è riuscito a recapitare l'email: ${lastErrorDetail}`,
+    };
+  } catch (err: any) {
+    console.error(`[${logTag}] Eccezione chiamata Resend:`, err.message);
+    return {
+      success: false,
+      error: `Errore durante la connessione con Resend: ${err.message}`,
+    };
+  }
+}
+
+function formatItalianDateServer(dateStr: string): string {
+  try {
+    const [y, m, d] = (dateStr || '').split('-');
+    const dateObj = new Date(Number(y), Number(m) - 1, Number(d));
+    if (isNaN(dateObj.getTime())) return dateStr || '';
+    return new Intl.DateTimeFormat('it-IT', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }).format(dateObj);
+  } catch {
+    return dateStr || '';
+  }
+}
+
+/**
+ * Invio email di benvenuto tramite Resend API ai nuovi utenti registrati
+ */
+async function sendWelcomeEmail(user: { name?: string; surname?: string; email: string }): Promise<{ success: boolean; error?: string }> {
+  const cleanEmail = (user.email || '').trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return { success: false, error: 'Email utente non valida' };
+  }
+  const fullName = `${user.name || ''} ${user.surname || ''}`.trim() || 'Associato';
+  const subject = 'Benvenuto in JESic Meet!';
+  const textContent = `Ciao ${fullName}, benvenuto su JESic Meet (Junior Enterprise Sicilia)! Il tuo account è attivo: puoi unirti ai gruppi di lavoro, votare i sondaggi di disponibilità, partecipare agli eventi e sincronizzare automaticamente i tuoi impegni con Google Calendar.`;
+  const htmlContent = `<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Benvenuto in JESic Meet</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Ubuntu', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F8F9FA; color: #1F2937; line-height: 1.6;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #F8F9FA; padding: 36px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 580px; background-color: #FFFFFF; border-radius: 16px; overflow: hidden; border: 1px solid #E5E7EB; box-shadow: 0 4px 16px rgba(0,0,0,0.05);">
+          <tr>
+            <td style="background-color: #111827; border-top: 5px solid #f23e2e; padding: 24px 32px;">
+              <div style="font-size: 22px; font-weight: 800; color: #FFFFFF; letter-spacing: -0.3px;">
+                JESic<span style="color: #f23e2e;">Meet</span>
+              </div>
+              <div style="font-size: 11px; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.8px; margin-top: 4px;">
+                Junior Enterprise Sicilia &bull; Piattaforma Riunioni &amp; Gruppi
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px;">
+              <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #f23e2e; margin-bottom: 8px;">
+                Registrazione Completata
+              </div>
+              <h1 style="margin: 0 0 16px 0; font-size: 22px; font-weight: 800; color: #111827;">
+                Benvenuto a bordo, ${fullName}!
+              </h1>
+              <p style="margin: 0 0 16px 0; font-size: 14px; color: #374151;">
+                Siamo felici di darti il benvenuto su <strong>JESic Meet</strong>. Il tuo profilo associato (<strong>${cleanEmail}</strong>) è stato creato correttamente.
+              </p>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #FEF2F2; border-radius: 12px; border: 1px solid #FECACA; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 18px 20px; font-size: 13px; color: #374151;">
+                    <div style="font-weight: 700; color: #991B1B; margin-bottom: 8px;">Cosa puoi fare da subito:</div>
+                    <ul style="margin: 0; padding-left: 18px;">
+                      <li style="margin-bottom: 6px;">Entrare nei tuoi gruppi di lavoro tramite codice o link d'invito.</li>
+                      <li style="margin-bottom: 6px;">Esprimere le tue disponibilità nei sondaggi e confermare la partecipazione agli eventi.</li>
+                      <li style="margin-bottom: 6px;">Chattare in tempo reale nei gruppi e nei sottogruppi dedicati.</li>
+                      <li>Sincronizzare automaticamente riunioni e link Google Meet con il tuo Google Calendar.</li>
+                    </ul>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0; font-size: 13px; color: #6B7280;">
+                A presto su JESic Meet,<br />
+                <strong style="color: #111827;">Il Team Junior Enterprise Sicilia</strong>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #F9FAFB; border-top: 1px solid #E5E7EB; padding: 18px 32px; text-align: center; color: #9CA3AF; font-size: 11px;">
+              Junior Enterprise Sicilia (JESic) &bull; info@jesicmeet.it
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return sendEmailViaResend({
+    to: cleanEmail,
+    subject,
+    html: htmlContent,
+    text: textContent,
+    logTag: 'Welcome Email',
+  });
+}
+
+/**
+ * Invio email di recupero password tramite Resend API
  */
 async function sendPasswordResetEmail(cleanEmail: string, otpCode: string): Promise<{ success: boolean; error?: string }> {
   const subject = 'Codice di recupero password - JESic Meet';
@@ -768,76 +973,110 @@ async function sendPasswordResetEmail(cleanEmail: string, otpCode: string): Prom
     </div>
   `;
 
-  const resendApiKey = process.env.RESEND_API_KEY?.trim();
-  if (!resendApiKey) {
-    return {
-      success: false,
-      error: "Servizio email non configurato. Inserisci la variabile RESEND_API_KEY nel pannello 'Environment' di Render (crea una chiave gratuita su resend.com).",
-    };
-  }
+  return sendEmailViaResend({
+    to: cleanEmail,
+    subject,
+    html: htmlContent,
+    text: textContent,
+    logTag: 'Password Reset',
+  });
+}
 
-  try {
-    let rawFrom = process.env.RESEND_FROM?.trim();
-    // Se non impostato o se contiene ancora il dominio di test resend.dev, usa il dominio verificato jesicmeet.it
-    if (!rawFrom || rawFrom.includes('resend.dev')) {
-      rawFrom = 'JESic Meet <info@jesicmeet.it>';
-    }
+/**
+ * Invio email di conferma appuntamento ESCLUSIVAMENTE al cliente esterno tramite Resend
+ * (Senza inserimento diretto sul Google Calendar del cliente)
+ */
+async function sendClientConfirmationEmailViaResend(params: {
+  companyName: string;
+  contactEmail: string;
+  meetingTitle?: string;
+  description?: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  meetLink: string;
+  organizerName?: string;
+  organizerRole?: string;
+  organizerEmail?: string;
+}) {
+  const contactEmail = (params.contactEmail || '').trim().toLowerCase();
+  if (!contactEmail || !contactEmail.includes('@')) return { success: false, error: 'Email cliente mancante' };
 
-    // Lista di mittenti ordinata con priorità al dominio verificato @jesicmeet.it
-    const sendersToTry: string[] = [];
-    const addSender = (s: string) => {
-      if (!sendersToTry.includes(s)) sendersToTry.push(s);
-    };
+  const formattedDate = formatItalianDateServer(params.date);
+  const meetingTitle = params.meetingTitle || `Call con ${params.companyName}`;
+  const organizerEmail = params.organizerEmail || 'info@jesicmeet.it';
+  const html = generateClientConfirmationEmailHtml({
+    companyName: params.companyName,
+    contactEmail,
+    meetingTitle,
+    description: params.description,
+    dateStr: params.date,
+    formattedDate,
+    startTime: params.startTime,
+    endTime: params.endTime,
+    meetLink: params.meetLink,
+    organizerName: params.organizerName || 'Team Junior Enterprise Sicilia',
+    organizerRole: params.organizerRole || 'Area Relazioni Esterne & B2B',
+    organizerEmail,
+  });
 
-    addSender(rawFrom);
-    addSender('JESic Meet <info@jesicmeet.it>');
-    addSender('JESic Meet <noreply@jesicmeet.it>');
-    addSender('JESic Meet <info@jesic.it>');
+  const text = `Gentile ${params.companyName}, confermiamo l'appuntamento "${meetingTitle}" per il giorno ${formattedDate} dalle ${params.startTime} alle ${params.endTime}. Link Google Meet: ${params.meetLink}`;
 
-    let lastErrorDetail = '';
-    for (const sender of sendersToTry) {
-      console.log(`[Password Reset] Invio Resend con mittente: ${sender} a ${cleanEmail}...`);
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${resendApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: sender,
-          to: [cleanEmail],
-          subject,
-          html: htmlContent,
-          text: textContent,
-        }),
-      });
+  return sendEmailViaResend({
+    to: contactEmail,
+    subject: `Conferma Appuntamento: ${meetingTitle} - ${formattedDate}`,
+    html,
+    text,
+    replyTo: organizerEmail,
+    logTag: 'Client Confirmation Email',
+  });
+}
 
-      const data: any = await res.json().catch(() => ({}));
-      if (res.ok) {
-        console.log(`[Password Reset] Email inviata con successo via Resend da ${sender} a ${cleanEmail}`);
-        return { success: true };
-      }
+/**
+ * Invio email di mancata conferma / annullamento ESCLUSIVAMENTE al cliente esterno tramite Resend
+ */
+async function sendClientCancellationEmailViaResend(params: {
+  companyName: string;
+  contactEmail: string;
+  meetingTitle?: string;
+  description?: string;
+  reason?: string;
+  wasConfirmed?: boolean;
+  organizerName?: string;
+  organizerRole?: string;
+  organizerEmail?: string;
+}) {
+  const contactEmail = (params.contactEmail || '').trim().toLowerCase();
+  if (!contactEmail || !contactEmail.includes('@')) return { success: false, error: 'Email cliente mancante' };
 
-      lastErrorDetail = data?.message || data?.error || (typeof data === 'string' ? data : `Errore HTTP ${res.status}`);
-      console.warn(`[Password Reset] Risposta non OK da Resend con mittente ${sender}:`, lastErrorDetail);
+  const meetingTitle = params.meetingTitle || `Incontro con ${params.companyName}`;
+  const organizerEmail = params.organizerEmail || 'info@jesicmeet.it';
+  const html = generateClientCancellationEmailHtml({
+    companyName: params.companyName,
+    contactEmail,
+    meetingTitle,
+    description: params.description,
+    reason: params.reason,
+    wasConfirmed: params.wasConfirmed,
+    organizerName: params.organizerName || 'Team Junior Enterprise Sicilia',
+    organizerRole: params.organizerRole || 'Area Relazioni Esterne & B2B',
+    organizerEmail,
+  });
 
-      // Se l'errore non riguarda restrizioni sul mittente 'from' o sul dominio, interrompi il ciclo
-      if (!lastErrorDetail.toLowerCase().includes('from') && !lastErrorDetail.toLowerCase().includes('domain') && !lastErrorDetail.toLowerCase().includes('testing emails')) {
-        break;
-      }
-    }
+  const text = params.wasConfirmed
+    ? `Gentile ${params.companyName}, la informiamo che l'appuntamento "${meetingTitle}" è stato annullato.${params.reason ? ` Nota: ${params.reason}` : ''}`
+    : `Gentile ${params.companyName}, purtroppo non ci è possibile confermare la richiesta di incontro "${meetingTitle}" nelle date indicate.${params.reason ? ` Nota: ${params.reason}` : ''}`;
 
-    return {
-      success: false,
-      error: `Resend non è riuscito a recapitare l'email: ${lastErrorDetail}`,
-    };
-  } catch (err: any) {
-    console.error(`[Password Reset] Eccezione chiamata Resend:`, err.message);
-    return {
-      success: false,
-      error: `Errore durante la connessione con Resend: ${err.message}`,
-    };
-  }
+  return sendEmailViaResend({
+    to: contactEmail,
+    subject: params.wasConfirmed
+      ? `Annullamento Appuntamento: ${meetingTitle}`
+      : `Aggiornamento Richiesta Incontro: ${meetingTitle}`,
+    html,
+    text,
+    replyTo: organizerEmail,
+    logTag: 'Client Cancellation Email',
+  });
 }
 
 // POST /api/auth/forgot-password - Invio codice OTP a 6 cifre per recupero password
@@ -2854,14 +3093,18 @@ const syncConfirmedEventAcrossUserCalendars = async (
     }
   }
 
-  const normalizedExtraEmails = Array.from(
-    new Set(
-      [
-        ...(Array.isArray(eventObj?.externalInviteEmails) ? eventObj.externalInviteEmails : []),
-        ...(eventObj?.clientInfo?.contactEmail ? [eventObj.clientInfo.contactEmail] : []),
-      ]
+  // Per i clienti B2B dal form pubblico (/prenota-call), NON si inserisce mai l'evento direttamente sul loro Google Calendar:
+  // ricevono solo l'email dedicata di conferma o eventuale annullamento/rifiuto.
+  const excludedClientEmail =
+    typeof eventObj?.clientInfo?.contactEmail === 'string'
+      ? eventObj.clientInfo.contactEmail.trim().toLowerCase()
+      : '';
+
+  const normalizedExtraEmails: string[] = Array.from(
+    new Set<string>(
+      (Array.isArray(eventObj?.externalInviteEmails) ? eventObj.externalInviteEmails : [])
         .map((e: any) => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
-        .filter((e: string) => e.includes('@'))
+        .filter((e: string) => e.includes('@') && e !== excludedClientEmail)
     )
   );
 
@@ -3157,6 +3400,24 @@ app.post('/api/events', async (req: Request, res: Response) => {
       id: created._id || created.id,
     };
 
+    // Se il sondaggio proviene da una richiesta cliente (/prenota-call), aggiorna subito la richiesta collegata
+    if (mappedEvent.clientRequestId) {
+      try {
+        const updatedReq = await ClientRequestModel.findOneAndUpdate(
+          { $or: [{ _id: mappedEvent.clientRequestId }, { id: mappedEvent.clientRequestId }] },
+          { $set: { status: 'converted_to_poll', pollEventId: mappedEvent.id } },
+          { new: true }
+        );
+        if (updatedReq) {
+          broadcastRealtimeEvent('client_request:updated', {
+            request: { ...updatedReq.toObject(), id: updatedReq._id || updatedReq.id },
+          });
+        }
+      } catch (reqUpdErr: any) {
+        console.warn('[ClientRequest] Errore collegamento pollEventId:', reqUpdErr?.message || reqUpdErr);
+      }
+    }
+
     broadcastRealtimeEvent('event:created', { event: mappedEvent });
 
     // Invia notifica Push reale
@@ -3388,6 +3649,67 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     const mappedUpdated = { ...updated.toObject(), id: updated._id || updated.id };
     broadcastRealtimeEvent('event:updated', { event: mappedUpdated });
 
+    // Se il sondaggio confermato/modificato è associato a un cliente B2B (/prenota-call),
+    // invia la conferma o aggiornamento via Resend ESCLUSIVAMENTE al cliente (senza inserirlo sul Calendar del cliente)
+    if (
+      mappedUpdated.status === 'confirmed' &&
+      mappedUpdated.finalizedSlot &&
+      (mappedUpdated.clientRequestId || mappedUpdated.clientInfo?.contactEmail)
+    ) {
+      (async () => {
+        try {
+          let targetClientReq: any = null;
+          if (mappedUpdated.clientRequestId) {
+            targetClientReq = await ClientRequestModel.findOneAndUpdate(
+              { $or: [{ _id: mappedUpdated.clientRequestId }, { id: mappedUpdated.clientRequestId }] },
+              {
+                $set: {
+                  status: 'confirmed',
+                  finalizedSlot: mappedUpdated.finalizedSlot,
+                  meetLink: mappedUpdated.meetLink || undefined,
+                  emailConfirmationSentAt: new Date(),
+                },
+              },
+              { new: true }
+            );
+            if (targetClientReq) {
+              broadcastRealtimeEvent('client_request:updated', {
+                request: { ...targetClientReq.toObject(), id: targetClientReq._id || targetClientReq.id },
+              });
+            }
+          }
+
+          const clientEmail =
+            mappedUpdated.clientInfo?.contactEmail || targetClientReq?.contactEmail;
+          const companyName =
+            mappedUpdated.clientInfo?.companyName || targetClientReq?.companyName || 'Cliente';
+
+          if (clientEmail && mappedUpdated.finalizedSlot) {
+            const creatorUser: any = await UserModel.findOne({
+              $or: [{ _id: mappedUpdated.creatorId }, { id: mappedUpdated.creatorId }],
+            }).lean();
+            await sendClientConfirmationEmailViaResend({
+              companyName,
+              contactEmail: clientEmail,
+              meetingTitle: mappedUpdated.title,
+              description: targetClientReq?.description || mappedUpdated.description,
+              date: mappedUpdated.finalizedSlot.date,
+              startTime: mappedUpdated.finalizedSlot.startTime,
+              endTime: mappedUpdated.finalizedSlot.endTime,
+              meetLink: mappedUpdated.meetLink || 'https://meet.google.com',
+              organizerName: creatorUser
+                ? `${creatorUser.name || ''} ${creatorUser.surname || ''}`.trim()
+                : 'Team JESic',
+              organizerRole: 'Area Relazioni Esterne & B2B',
+              organizerEmail: creatorUser?.email || 'info@jesicmeet.it',
+            });
+          }
+        } catch (clientMailErr: any) {
+          console.warn('[Client Confirmation Email] Errore invio su PATCH event:', clientMailErr?.message || clientMailErr);
+        }
+      })();
+    }
+
     if (mappedUpdated.status === 'confirmed' && mappedUpdated.finalizedSlot) {
       sendEventConfirmedPushNotification({
         eventId: mappedUpdated.id,
@@ -3454,23 +3776,48 @@ const handleDeleteEventOrPoll = async (req: Request, res: Response) => {
     }
 
     // 3. Solo DOPO aver avvisato Google, esegui l'eliminazione da MongoDB
+    const deletedObj = eventToDelete.toObject ? eventToDelete.toObject() : eventToDelete;
     await EventModel.deleteOne({ $or: [{ _id: id }, { id }] });
     await EventResponseModel.deleteMany({ eventId: id });
-    const affectedRequests = await ClientRequestModel.find({ pollEventId: id }).lean();
-    if (affectedRequests.length > 0) {
-      await ClientRequestModel.updateMany(
+    const affectedRequests = await ClientRequestModel.find({
+      $or: [
         { pollEventId: id },
-        { $set: { status: 'pending', pollEventId: null } }
+        ...(deletedObj?.clientRequestId ? [{ _id: deletedObj.clientRequestId }] : []),
+      ],
+    }).lean();
+    if (affectedRequests.length > 0) {
+      const wasConfirmedEvent = deletedObj?.status === 'confirmed';
+      await ClientRequestModel.updateMany(
+        {
+          $or: [
+            { pollEventId: id },
+            ...(deletedObj?.clientRequestId ? [{ _id: deletedObj.clientRequestId }] : []),
+          ],
+        },
+        {
+          $set: wasConfirmedEvent
+            ? { status: 'rejected', pollEventId: null }
+            : { status: 'pending', pollEventId: null },
+        }
       );
       for (const reqItem of affectedRequests as any[]) {
         broadcastRealtimeEvent('client_request:updated', {
           request: {
             ...reqItem,
             id: reqItem._id || reqItem.id,
-            status: 'pending',
+            status: wasConfirmedEvent ? 'rejected' : 'pending',
             pollEventId: null,
           },
         });
+        if (wasConfirmedEvent && reqItem.contactEmail) {
+          sendClientCancellationEmailViaResend({
+            companyName: reqItem.companyName || 'Cliente',
+            contactEmail: reqItem.contactEmail,
+            meetingTitle: deletedObj?.title,
+            description: reqItem.description,
+            wasConfirmed: true,
+          }).catch(() => {});
+        }
       }
     }
 
@@ -3594,6 +3941,60 @@ const handleUpdatePollConfirmedDate = async (req: Request, res: Response) => {
     };
 
     broadcastRealtimeEvent('event:updated', { event: mapped });
+
+    // Se il sondaggio modificato è associato a un cliente B2B (/prenota-call),
+    // aggiorna la richiesta cliente e invia la conferma/aggiornamento via Resend ESCLUSIVAMENTE al cliente
+    if (mapped.clientRequestId || mapped.clientInfo?.contactEmail) {
+      (async () => {
+        try {
+          let targetClientReq: any = null;
+          if (mapped.clientRequestId) {
+            targetClientReq = await ClientRequestModel.findOneAndUpdate(
+              { $or: [{ _id: mapped.clientRequestId }, { id: mapped.clientRequestId }] },
+              {
+                $set: {
+                  status: 'confirmed',
+                  finalizedSlot: finalDateObj,
+                  meetLink: mapped.meetLink || undefined,
+                  emailConfirmationSentAt: new Date(),
+                },
+              },
+              { new: true }
+            );
+            if (targetClientReq) {
+              broadcastRealtimeEvent('client_request:updated', {
+                request: { ...targetClientReq.toObject(), id: targetClientReq._id || targetClientReq.id },
+              });
+            }
+          }
+
+          const clientEmail = mapped.clientInfo?.contactEmail || targetClientReq?.contactEmail;
+          const companyName = mapped.clientInfo?.companyName || targetClientReq?.companyName || 'Cliente';
+          if (clientEmail) {
+            const creatorUser: any = await UserModel.findOne({
+              $or: [{ _id: mapped.creatorId }, { id: mapped.creatorId }],
+            }).lean();
+            await sendClientConfirmationEmailViaResend({
+              companyName,
+              contactEmail: clientEmail,
+              meetingTitle: mapped.title,
+              description: targetClientReq?.description || mapped.description,
+              date: targetDate,
+              startTime: targetStartTime,
+              endTime: targetEndTime,
+              meetLink: mapped.meetLink || 'https://meet.google.com',
+              organizerName: creatorUser
+                ? `${creatorUser.name || ''} ${creatorUser.surname || ''}`.trim()
+                : 'Team JESic',
+              organizerRole: 'Area Relazioni Esterne & B2B',
+              organizerEmail: creatorUser?.email || 'info@jesicmeet.it',
+            });
+          }
+        } catch (clientMailErr: any) {
+          console.warn('[Client Confirmation Email] Errore invio su confirmed-date:', clientMailErr?.message || clientMailErr);
+        }
+      })();
+    }
 
     // Invia notifica push reale per la conferma della riunione
     sendEventConfirmedPushNotification({
@@ -3957,6 +4358,17 @@ app.patch('/api/client-requests/:id', async (req: Request, res: Response) => {
     }
     const mappedRequest = { ...updated.toObject(), id: updated._id || updated.id };
     broadcastRealtimeEvent('client_request:updated', { request: mappedRequest });
+
+    if (updates.status === 'rejected' && existing.status !== 'rejected' && mappedRequest.contactEmail) {
+      sendClientCancellationEmailViaResend({
+        companyName: mappedRequest.companyName,
+        contactEmail: mappedRequest.contactEmail,
+        description: mappedRequest.description,
+        reason: updates.rejectionReason,
+        wasConfirmed: existing.status === 'confirmed',
+      }).catch(() => {});
+    }
+
     return res.json({ success: true, request: mappedRequest });
   } catch (err: any) {
     console.error('Errore aggiornamento ClientRequestModel MongoDB:', err.message);
@@ -3965,6 +4377,7 @@ app.patch('/api/client-requests/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/client-requests/:id/confirm-final - Chiusura e conferma call con cliente in MongoDB (Riservato ESCLUSIVAMENTE ad admin_clienti del gruppo)
+// REGOLA: Inserimento diretto sul Google Calendar SOLO per il team JESic; al cliente NON si inserisce su Calendar ma si invia l'email di conferma tramite Resend SOLO a lui.
 app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Response) => {
   const { id } = req.params;
   const {
@@ -3976,6 +4389,9 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
     eventId,
     googleAccessToken,
     googleRefreshToken,
+    organizerName,
+    organizerRole,
+    adminEmail,
   } = req.body;
 
   try {
@@ -4003,6 +4419,9 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
 
     let finalMeet = meetLink && !isPlaceholderMeetLink(meetLink) ? String(meetLink) : '';
     let updatedLinkedEvent: any = null;
+    let directCalendarEvents: Array<{ userId: string; googleEventId: string }> = Array.isArray(existing.googleCalendarEvents)
+      ? existing.googleCalendarEvents.map((e: any) => ({ userId: String(e.userId), googleEventId: String(e.googleEventId) }))
+      : [];
 
     const targetEventId = eventId || existing.pollEventId;
     const reqAccessToken = req.headers.authorization?.replace('Bearer ', '') || googleAccessToken;
@@ -4042,6 +4461,7 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
         linkedEvent.finalizedSlot = finalSlot;
         linkedEvent.finalDate = finalSlot as any;
         linkedEvent.googleCalendarEvents = calSync.googleCalendarEvents as any;
+        directCalendarEvents = calSync.googleCalendarEvents;
         if (calSync.primaryGoogleEventId) {
           linkedEvent.googleEventId = calSync.primaryGoogleEventId;
           linkedEvent.googleCalendarEventId = calSync.primaryGoogleEventId;
@@ -4054,13 +4474,13 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
         updatedLinkedEvent = { ...linkedEvent.toObject(), id: linkedEvent._id || linkedEvent.id };
         broadcastRealtimeEvent('event:updated', { event: updatedLinkedEvent });
       }
-    } else if (userId && (reqAccessToken || googleRefreshToken || true)) {
+    } else if (userId) {
       try {
         const adminUser = await UserModel.findOne({ $or: [{ _id: userId }, { id: userId }] }).lean();
         const refreshToken = googleRefreshToken || (adminUser as any)?.googleRefreshToken;
         const accessToken = reqAccessToken || (adminUser as any)?.googleAccessToken;
-        if (refreshToken || accessToken) {
-          const contactEmail = existing.contactEmail?.trim();
+        if ((adminUser as any)?.googleCalendarConnected !== false && (refreshToken || accessToken)) {
+          // Inserimento SOLO sul calendario dell'organizzatore/team interno: il cliente NON viene inserito su Google Calendar
           const calRes = await createGoogleCalendarEvent({
             accessToken,
             refreshToken,
@@ -4070,11 +4490,14 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
             startTime: finalizedStartTime,
             endTime: finalizedEndTime,
             isOnline: true,
-            sendUpdates: contactEmail ? 'externalOnly' : 'none',
-            attendeeEmails: contactEmail ? [contactEmail] : [],
+            sendUpdates: 'none',
+            attendeeEmails: [],
           });
-          if (calRes.success && calRes.meetLink) {
-            finalMeet = calRes.meetLink;
+          if (calRes.success) {
+            if (calRes.meetLink) finalMeet = calRes.meetLink;
+            if (calRes.eventId) {
+              directCalendarEvents = [{ userId: String(userId), googleEventId: calRes.eventId }];
+            }
           }
         }
       } catch (calErr: any) {
@@ -4086,12 +4509,29 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
       finalMeet = `https://meet.google.com/jes-${Math.random().toString(36).substring(2, 6)}-call`;
     }
 
+    // Invio email di conferma tramite Resend ESCLUSIVAMENTE al cliente esterno
+    const emailResult = await sendClientConfirmationEmailViaResend({
+      companyName: existing.companyName,
+      contactEmail: existing.contactEmail,
+      meetingTitle: `Call con ${existing.companyName}`,
+      description: existing.description,
+      date: finalizedDate,
+      startTime: finalizedStartTime,
+      endTime: finalizedEndTime,
+      meetLink: finalMeet,
+      organizerName: organizerName || 'Team Junior Enterprise Sicilia',
+      organizerRole: organizerRole || 'Area Relazioni Esterne & B2B',
+      organizerEmail: adminEmail || 'info@jesicmeet.it',
+    });
+
     const updated = await ClientRequestModel.findOneAndUpdate(
       { $or: [{ _id: id }, { id }] },
       {
         status: 'confirmed',
         finalizedSlot: finalSlot,
         meetLink: finalMeet,
+        googleCalendarEvents: directCalendarEvents,
+        emailConfirmationSentAt: emailResult.success ? new Date() : existing.emailConfirmationSentAt,
         updatedAt: new Date(),
       },
       { new: true }
@@ -4106,7 +4546,11 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
 
     return res.json({
       success: true,
-      message: 'Richiesta confermata con successo in MongoDB e sincronizzata su Google Calendar',
+      message: emailResult.success
+        ? 'Richiesta confermata ed email inviata al cliente tramite Resend.'
+        : 'Richiesta confermata nel database (controlla configurazione Resend per il recapito email).',
+      emailSent: emailResult.success,
+      emailError: emailResult.error,
       meetLink: finalMeet,
       request: mappedRequest,
       ...(updatedLinkedEvent ? { event: updatedLinkedEvent } : {}),
@@ -4114,6 +4558,111 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
   } catch (err: any) {
     console.error('Errore confirm-final ClientRequestModel MongoDB:', err.message);
     return res.status(500).json({ error: 'Errore conferma call cliente in MongoDB' });
+  }
+});
+
+// POST /api/client-requests/:id/reject - Non conferma o annullamento call cliente con invio email Resend ESCLUSIVAMENTE al cliente
+app.post('/api/client-requests/:id/reject', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const {
+    userId,
+    reason,
+    organizerName,
+    organizerRole,
+    adminEmail,
+    googleAccessToken,
+    googleRefreshToken,
+  } = req.body;
+
+  try {
+    const existing = await ClientRequestModel.findOne({ $or: [{ _id: id }, { id }] });
+    if (!existing) {
+      return res.status(404).json({ error: 'Richiesta non trovata nel database' });
+    }
+
+    if (userId && existing.groupId) {
+      const group = (await GroupModel.findOne({ $or: [{ _id: existing.groupId }, { id: existing.groupId }] } as any)) as any;
+      if (group) {
+        const member = group.members?.find((m: any) => m.userId === userId);
+        const isAdminClienti = member && member.role === 'admin_clienti';
+        if (!isAdminClienti) {
+          return res.status(403).json({ error: 'Accesso negato: solo admin_clienti del gruppo associato può rifiutare o annullare la call cliente' });
+        }
+      }
+    }
+
+    const wasConfirmed = existing.status === 'confirmed';
+    const overrideTokens: Record<string, CalendarTokenOverride> = {};
+    if (userId) {
+      overrideTokens[String(userId)] = {
+        accessToken: req.headers.authorization?.replace('Bearer ', '') || googleAccessToken,
+        refreshToken: googleRefreshToken,
+      };
+    }
+
+    // Se esiste un evento/sondaggio collegato nel team interno, rimuovilo anche dai calendari del team
+    if (existing.pollEventId) {
+      try {
+        const linkedEvent = await EventModel.findOne({
+          $or: [{ _id: existing.pollEventId }, { id: existing.pollEventId }],
+        });
+        if (linkedEvent) {
+          const linkedObj = linkedEvent.toObject ? linkedEvent.toObject() : linkedEvent;
+          await deleteEventAcrossUserCalendars(linkedObj, overrideTokens);
+          await EventModel.deleteOne({ $or: [{ _id: existing.pollEventId }, { id: existing.pollEventId }] });
+          await EventResponseModel.deleteMany({ eventId: existing.pollEventId });
+          broadcastRealtimeEvent('event:deleted', { eventId: existing.pollEventId });
+        }
+      } catch (linkedDelErr: any) {
+        console.warn('[ClientRequest Reject] Errore pulizia evento team collegato:', linkedDelErr?.message || linkedDelErr);
+      }
+    } else if (Array.isArray(existing.googleCalendarEvents) && existing.googleCalendarEvents.length > 0) {
+      await deleteEventAcrossUserCalendars(
+        { googleCalendarEvents: existing.googleCalendarEvents },
+        overrideTokens
+      );
+    }
+
+    const emailResult = await sendClientCancellationEmailViaResend({
+      companyName: existing.companyName,
+      contactEmail: existing.contactEmail,
+      meetingTitle: `Call con ${existing.companyName}`,
+      description: existing.description,
+      reason: reason ? String(reason).trim() : undefined,
+      wasConfirmed,
+      organizerName: organizerName || 'Team Junior Enterprise Sicilia',
+      organizerRole: organizerRole || 'Area Relazioni Esterne & B2B',
+      organizerEmail: adminEmail || 'info@jesicmeet.it',
+    });
+
+    const updated = await ClientRequestModel.findOneAndUpdate(
+      { $or: [{ _id: id }, { id }] },
+      {
+        status: 'rejected',
+        rejectionReason: reason ? String(reason).trim() : null,
+        pollEventId: null,
+        googleCalendarEvents: [],
+        updatedAt: new Date(),
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Richiesta non trovata nel database' });
+    }
+
+    const mappedRequest = { ...updated.toObject(), id: updated._id || updated.id };
+    broadcastRealtimeEvent('client_request:updated', { request: mappedRequest });
+
+    return res.json({
+      success: true,
+      emailSent: emailResult.success,
+      emailError: emailResult.error,
+      request: mappedRequest,
+    });
+  } catch (err: any) {
+    console.error('Errore reject ClientRequestModel MongoDB:', err.message);
+    return res.status(500).json({ error: 'Errore rifiuto/annullamento richiesta cliente in MongoDB' });
   }
 });
 

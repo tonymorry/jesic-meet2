@@ -936,8 +936,20 @@ export default function App() {
       fetch('/api/client-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestData),
-      }).catch((e) => console.log('[Client Request API local sync]', e));
+        body: JSON.stringify({
+          ...requestData,
+          id: newReqId,
+        }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.request) {
+            setClientRequests((prev) =>
+              prev.map((r) => (r.id === newReqId ? { ...r, ...data.request } : r))
+            );
+          }
+        })
+        .catch((e) => console.log('[Client Request API local sync]', e));
     } catch {}
 
     return true;
@@ -1031,6 +1043,59 @@ export default function App() {
       }
     } catch (e) {
       console.log('[API confirmation sync]', e);
+    }
+  };
+
+  // Rifiuto / Annullamento Richiesta Cliente (solo email al cliente via Resend, nessun inserimento su Google Calendar cliente)
+  const handleRejectClientRequest = async (request: ClientRequest, reason?: string) => {
+    const cleanReason = reason?.trim() || undefined;
+    const nowIso = new Date().toISOString();
+
+    setClientRequests((prev) =>
+      prev.map((r) =>
+        r.id === request.id
+          ? {
+              ...r,
+              status: 'rejected',
+              rejectionReason: cleanReason,
+              updatedAt: nowIso,
+            }
+          : r
+      )
+    );
+
+    if (request.pollEventId) {
+      setEvents((prev) => prev.filter((e) => e.id !== request.pollEventId));
+      setResponses((prev) => prev.filter((resp) => resp.eventId !== request.pollEventId));
+    }
+
+    try {
+      const res = await fetch(`/api/client-requests/${request.id}/reject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(currentUser?.googleAccessToken ? { Authorization: `Bearer ${currentUser.googleAccessToken}` } : {}),
+        },
+        body: JSON.stringify({
+          userId: currentUser?.id,
+          reason: cleanReason,
+          googleAccessToken: currentUser?.googleAccessToken,
+          googleRefreshToken: currentUser?.googleRefreshToken,
+          organizerName: currentUser ? `${currentUser.name} ${currentUser.surname}` : 'Team JESic',
+          organizerRole: currentUser?.role || 'Admin Clienti JESic',
+          adminEmail: currentUser?.email,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.request) {
+          setClientRequests((prev) =>
+            prev.map((r) => (r.id === request.id ? { ...r, ...data.request } : r))
+          );
+        }
+      }
+    } catch (e) {
+      console.log('[API reject client request sync]', e);
     }
   };
 
@@ -1937,6 +2002,21 @@ export default function App() {
     setPollPrefillData(undefined);
     setEventToEdit(undefined);
 
+    if (newEventData.clientRequestId) {
+      setClientRequests((prev) =>
+        prev.map((r) =>
+          r.id === newEventData.clientRequestId
+            ? {
+                ...r,
+                status: 'converted_to_poll',
+                pollEventId: newId,
+                updatedAt: nowIso,
+              }
+            : r
+        )
+      );
+    }
+
     fetch('/api/events', {
       method: 'POST',
       headers: {
@@ -1946,6 +2026,7 @@ export default function App() {
       body: JSON.stringify({
         ...newMeetingEvent,
         googleAccessToken: currentUser.googleAccessToken,
+        googleRefreshToken: currentUser.googleRefreshToken,
       }),
     }).catch((e) => console.log('[API create poll sync]', e));
   };
@@ -1998,7 +2079,9 @@ export default function App() {
       },
       body: JSON.stringify({
         ...newMeetingEvent,
+        userId: currentUser.id,
         googleAccessToken: currentUser.googleAccessToken,
+        googleRefreshToken: currentUser.googleRefreshToken,
       }),
     })
       .then((res) => (res.ok ? res.json() : null))
@@ -2770,6 +2853,7 @@ export default function App() {
                     activeGroup={activeGroup}
                     onConvertToPoll={handleConvertToPoll}
                     onConfirmFinalEvent={handleConfirmFinalClientEvent}
+                    onRejectRequest={handleRejectClientRequest}
                     onOpenPublicBooking={navigateToPublicBooking}
                     onOpenEventDetail={(evtId) => setSelectedEventId(evtId)}
                   />

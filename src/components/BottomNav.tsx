@@ -171,11 +171,13 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               aria-label="Profilo personale"
             >
               <div
-                className={`p-0.5 rounded-full transition-all ${
-                  currentTab === 'profile' ? 'ring-2 ring-[#f23e2e]' : ''
+                className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                  currentTab === 'profile'
+                    ? 'ring-2 ring-[#f23e2e] ring-offset-1 ring-offset-white dark:ring-offset-neutral-900 scale-105'
+                    : ''
                 }`}
               >
-                <UserAvatar user={currentUser} size="xs" />
+                <UserAvatar user={currentUser} size="xs" className="!flex items-center justify-center" />
               </div>
               <span
                 className={`text-[11px] mt-1 tracking-tight leading-none ${

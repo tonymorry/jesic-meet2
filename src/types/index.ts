@@ -101,7 +101,7 @@ export interface ClientSlotPreference {
   slotKey: string; // 'YYYY-MM-DDTHH:mm'
 }
 
-export type ClientRequestStatus = 'pending' | 'converted_to_poll' | 'confirmed' | 'archived';
+export type ClientRequestStatus = 'pending' | 'converted_to_poll' | 'confirmed' | 'rejected' | 'archived';
 
 export interface ClientRequest {
   id: string;
@@ -114,6 +114,7 @@ export interface ClientRequest {
   pollEventId?: string;
   finalizedSlot?: FinalizedSlot;
   meetLink?: string;
+  rejectionReason?: string;
   createdAt: string;
   updatedAt: string;
 }

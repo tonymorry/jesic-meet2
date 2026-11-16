@@ -63,7 +63,7 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
   const initials = computeInitials();
 
   return (
-    <div className={`relative inline-flex shrink-0 ${className}`}>
+    <div className={`relative inline-flex items-center justify-center shrink-0 leading-none ${className}`}>
       <div
         className={`${currentSize.box} ${roundedClass} bg-gradient-to-br from-[#f23e2e] via-red-600 to-red-800 text-white font-black ${currentSize.text} flex items-center justify-center shrink-0 shadow-2xs select-none ring-1 ring-red-400/40`}
       >

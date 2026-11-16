@@ -407,3 +407,130 @@ export function generateClientRequestReceivedEmailHtml(data: ClientRequestReceiv
 </html>`;
 }
 
+export interface ClientCancellationEmailData {
+  companyName: string;
+  contactEmail: string;
+  meetingTitle?: string;
+  description?: string;
+  reason?: string;
+  wasConfirmed?: boolean;
+  organizerName?: string;
+  organizerRole?: string;
+  organizerEmail?: string;
+}
+
+/**
+ * Genera il template HTML istituzionale inviato esclusivamente al cliente
+ * quando una richiesta di incontro non viene confermata oppure un appuntamento confermato viene annullato.
+ */
+export function generateClientCancellationEmailHtml(data: ClientCancellationEmailData): string {
+  const organizer = data.organizerName || 'Team Junior Enterprise Sicilia';
+  const role = data.organizerRole || 'Area Relazioni Esterne & B2B';
+  const adminEmail = data.organizerEmail || 'info@jesicmeet.it';
+  const titleText = data.meetingTitle || `Incontro con ${data.companyName}`;
+  const isCancellation = Boolean(data.wasConfirmed);
+
+  return `<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${isCancellation ? 'Annullamento Appuntamento' : 'Aggiornamento Richiesta Incontro'} - Junior Enterprise Sicilia</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #F8F9FA; color: #1F2937; line-height: 1.6;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #F8F9FA; padding: 36px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 620px; background-color: #FFFFFF; border-radius: 12px; overflow: hidden; border: 1px solid #E5E7EB; box-shadow: 0 4px 16px rgba(0,0,0,0.04);">
+          <tr>
+            <td style="background-color: #111827; border-top: 5px solid #f23e2e; padding: 24px 36px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td>
+                    <div style="font-size: 19px; font-weight: 800; color: #FFFFFF; letter-spacing: -0.3px;">
+                      JESic <span style="color: #f23e2e;">Meet</span>
+                    </div>
+                    <div style="font-size: 11px; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.8px; margin-top: 4px;">
+                      Junior Enterprise Sicilia &bull; Consulenza d'Impresa
+                    </div>
+                  </td>
+                  <td align="right">
+                    <span style="display: inline-block; background-color: #1F2937; color: #FCA5A5; font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 6px; border: 1px solid #374151;">
+                      ${isCancellation ? 'Incontro Annullato' : 'Incontro Non Confermato'}
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 36px 36px 28px 36px;">
+              <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #f23e2e; margin-bottom: 8px;">
+                Comunicazione Ufficiale
+              </div>
+              <h1 style="margin: 0 0 16px 0; font-size: 21px; font-weight: 700; color: #111827; letter-spacing: -0.3px;">
+                ${isCancellation ? `Annullamento appuntamento: ${titleText}` : `Esito richiesta incontro: ${titleText}`}
+              </h1>
+
+              <p style="margin: 0 0 16px 0; font-size: 14px; color: #374151;">
+                Gentile <strong>${data.companyName}</strong>,
+              </p>
+
+              <p style="margin: 0 0 20px 0; font-size: 14px; color: #4B5563; text-align: justify;">
+                ${
+                  isCancellation
+                    ? `La informiamo che l'appuntamento precedentemente programmato con il nostro team è stato annullato.`
+                    : `La ringraziamo per averci contattato tramite il nostro modulo di prenotazione. Purtroppo, per indisponibilità nelle fasce orarie indicate o sopraggiunte esigenze organizzative, non ci è possibile confermare l'incontro richiesto.`
+                }
+              </p>
+
+              ${
+                data.reason
+                  ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #FEF2F2; border-radius: 8px; border: 1px solid #FECACA; margin-bottom: 24px;">
+                <tr>
+                  <td style="padding: 16px 20px; font-size: 13px; color: #7F1D1D;">
+                    <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; color: #991B1B;">
+                      Nota del team JESic
+                    </div>
+                    ${data.reason}
+                  </td>
+                </tr>
+              </table>`
+                  : ''
+              }
+
+              <p style="margin: 0 0 24px 0; font-size: 14px; color: #4B5563; text-align: justify;">
+                Qualora desiderasse concordare una nuova data o ricevere maggiori informazioni, può rispondere direttamente a questa email oppure compilare nuovamente il modulo di prenotazione indicando nuove disponibilità.
+              </p>
+
+              <div style="border-top: 1px solid #E5E7EB; padding-top: 20px; font-size: 13px; color: #374151;">
+                <p style="margin: 0 0 4px 0;">Cordiali saluti,</p>
+                <p style="margin: 0 0 2px 0; font-weight: 700; color: #111827;">${organizer}</p>
+                <p style="margin: 0 0 2px 0; color: #4B5563;">${role}</p>
+                <p style="margin: 0 0 2px 0; color: #6B7280;">Junior Enterprise Sicilia</p>
+                <p style="margin: 4px 0 0 0; color: #f23e2e; font-size: 12px;">
+                  Email: <a href="mailto:${adminEmail}" style="color: #f23e2e; text-decoration: underline;">${adminEmail}</a>
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color: #F9FAFB; border-top: 1px solid #E5E7EB; padding: 20px 36px; text-align: center; color: #6B7280; font-size: 11px; line-height: 1.5;">
+              <p style="margin: 0 0 4px 0; font-weight: 600; color: #374151;">
+                Junior Enterprise Sicilia (JESic) &bull; Confederazione Nazionale Junior Enterprises
+              </p>
+              <p style="margin: 0;">
+                Comunicazione inviata a ${data.contactEmail}. Per concordare un nuovo incontro rispondi a ${adminEmail}.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+

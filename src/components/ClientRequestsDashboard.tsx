@@ -33,11 +33,14 @@ import {
   Filter,
   Copy,
   Check,
+  XCircle,
 } from 'lucide-react';
 import { ClientRequest, Group, MeetingEvent, User } from '../types';
 import {
   generateClientConfirmationEmailHtml,
+  generateClientCancellationEmailHtml,
   EmailTemplateData,
+  ClientCancellationEmailData,
 } from '../utils/emailTemplate';
 
 interface ClientRequestsDashboardProps {
@@ -52,6 +55,7 @@ interface ClientRequestsDashboardProps {
     finalSlot: { date: string; startTime: string; endTime: string },
     eventId?: string
   ) => Promise<void> | void;
+  onRejectRequest?: (request: ClientRequest, reason?: string) => Promise<void> | void;
   onOpenPublicBooking: () => void;
   onOpenEventDetail?: (eventId: string) => void;
 }
@@ -64,21 +68,30 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
   activeGroup,
   onConvertToPoll,
   onConfirmFinalEvent,
+  onRejectRequest,
   onOpenPublicBooking,
   onOpenEventDetail,
 }) => {
-  // Solo le 3 sezioni operative: In Attesa, In Sondaggio, Confermate (rimossa la sezione 'Tutte')
+  // Sezioni operative: In Attesa, In Sondaggio, Confermate, Non Confermate
   const [filterStatus, setFilterStatus] = useState<
-    'pending' | 'converted_to_poll' | 'confirmed'
+    'pending' | 'converted_to_poll' | 'confirmed' | 'rejected'
   >('pending');
 
   // Modale Anteprima Email inviata / da inviare
   const [previewEmailData, setPreviewEmailData] = useState<EmailTemplateData | null>(null);
+  const [previewCancellationData, setPreviewCancellationData] =
+    useState<ClientCancellationEmailData | null>(null);
 
   // Modale Rapido Conferma Orario Definitivo
   const [confirmingRequest, setConfirmingRequest] = useState<ClientRequest | null>(null);
   const [chosenSlotIndex, setChosenSlotIndex] = useState<number>(0);
   const [isProcessingFinalConfirm, setIsProcessingFinalConfirm] = useState(false);
+
+  // Modale Rifiuto / Non Conferma al Cliente
+  const [rejectingRequest, setRejectingRequest] = useState<ClientRequest | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [isProcessingReject, setIsProcessingReject] = useState(false);
+
   const [copiedLink, setCopiedLink] = useState(false);
 
   // Filtro richieste per status selezionato
@@ -87,8 +100,23 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
   const pendingCount = requests.filter((r) => r.status === 'pending').length;
   const convertedCount = requests.filter((r) => r.status === 'converted_to_poll').length;
   const confirmedCount = requests.filter((r) => r.status === 'confirmed').length;
+  const rejectedCount = requests.filter((r) => r.status === 'rejected').length;
 
   const handleOpenEmailPreview = (request: ClientRequest) => {
+    if (request.status === 'rejected') {
+      setPreviewCancellationData({
+        companyName: request.companyName,
+        contactEmail: request.contactEmail,
+        meetingTitle: `Call con ${request.companyName}`,
+        description: request.description,
+        reason: request.rejectionReason,
+        wasConfirmed: Boolean(request.finalizedSlot),
+        organizerName: `${currentUser.name} ${currentUser.surname}`,
+        organizerRole: currentUser.role || 'Admin Clienti JESic',
+        organizerEmail: currentUser.email,
+      });
+      return;
+    }
     const slot = request.finalizedSlot || request.preferredSlots[0];
     const [y, m, d] = (slot.date || '').split('-');
     const dateObj = new Date(Number(y), Number(m) - 1, Number(d));
@@ -115,6 +143,20 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
     };
 
     setPreviewEmailData(emailData);
+  };
+
+  const handleExecuteReject = async () => {
+    if (!rejectingRequest || !onRejectRequest) return;
+    setIsProcessingReject(true);
+    try {
+      await onRejectRequest(rejectingRequest, rejectionReason.trim() || undefined);
+      setRejectingRequest(null);
+      setRejectionReason('');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsProcessingReject(false);
+    }
   };
 
   const handleExecuteFinalConfirm = async () => {
@@ -236,6 +278,18 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
         >
           Confermate ({confirmedCount})
         </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterStatus('rejected')}
+          className={`flex-1 py-2 px-3 rounded-xl transition-all cursor-pointer whitespace-nowrap text-center ${
+            filterStatus === 'rejected'
+              ? 'bg-white dark:bg-neutral-800 text-red-500 shadow-xs'
+              : 'text-neutral-500 dark:text-neutral-400 hover:text-red-500'
+          }`}
+        >
+          Non Confermate ({rejectedCount})
+        </button>
       </div>
 
       {/* Lista Richieste */}
@@ -253,7 +307,9 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
                 ? 'Non ci sono nuove richieste in attesa. I clienti possono inviare la loro richiesta tramite il link pubblico /prenota-call.'
                 : filterStatus === 'converted_to_poll'
                 ? 'Nessun sondaggio team attivo per le richieste clienti.'
-                : 'Nessun appuntamento cliente confermato al momento.'}
+                : filterStatus === 'confirmed'
+                ? 'Nessun appuntamento cliente confermato al momento.'
+                : 'Nessuna richiesta rifiutata o annullata al momento.'}
             </p>
           </div>
           <button
@@ -319,6 +375,12 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
                         Call Confermata
                       </span>
                     )}
+                    {req.status === 'rejected' && (
+                      <span className="px-2.5 py-1 rounded-full bg-red-100 dark:bg-red-950/60 text-red-800 dark:text-red-300 border border-red-300 dark:border-red-800 text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1">
+                        <XCircle className="w-3 h-3 text-red-500" />
+                        Non Confermata
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -329,6 +391,15 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
                   </span>
                   "{req.description}"
                 </div>
+
+                {req.status === 'rejected' && req.rejectionReason && (
+                  <div className="bg-red-50/70 dark:bg-red-950/30 rounded-2xl p-3 border border-red-200 dark:border-red-900/60 text-xs text-red-800 dark:text-red-200 leading-relaxed">
+                    <span className="font-bold block text-[10px] uppercase tracking-wider mb-1 text-red-600 dark:text-red-400">
+                      Motivazione inviata al cliente:
+                    </span>
+                    {req.rejectionReason}
+                  </div>
+                )}
 
                 {/* Preferenze Slot Indicate dal Cliente (2 o 3 slot) */}
                 <div className="space-y-1.5">
@@ -415,24 +486,43 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
                     className="py-2 px-3 rounded-xl border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Eye className="w-3.5 h-3.5 text-neutral-500" />
-                    <span>{req.status === 'confirmed' ? 'Anteprima Email Inviata' : 'Bozza Email Cliente'}</span>
+                    <span>
+                      {req.status === 'confirmed' || req.status === 'rejected'
+                        ? 'Anteprima Email Inviata'
+                        : 'Bozza Email Cliente'}
+                    </span>
                   </button>
 
-                  <div className="flex items-center gap-2">
-                    {/* CASO 1: Status 'pending' -> TASTO "CONVERTI IN SONDAGGIO TEAM" */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* CASO 1: Status 'pending' -> TASTO "CONVERTI IN SONDAGGIO TEAM" o "NON CONFERMARE" */}
                     {req.status === 'pending' && (
-                      <button
-                        type="button"
-                        onClick={() => onConvertToPoll(req)}
-                        className="py-2 px-4 rounded-xl bg-gradient-to-r from-[#f23e2e] to-red-600 hover:from-red-600 hover:to-red-700 text-white text-xs font-black shadow-md shadow-red-500/25 transition-all inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Converti in Sondaggio Team</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
+                      <>
+                        {onRejectRequest && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRejectingRequest(req);
+                              setRejectionReason('');
+                            }}
+                            className="py-2 px-3 rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50/70 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/60 text-red-700 dark:text-red-300 text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Non Confermare</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onConvertToPoll(req)}
+                          className="py-2 px-4 rounded-xl bg-gradient-to-r from-[#f23e2e] to-red-600 hover:from-red-600 hover:to-red-700 text-white text-xs font-black shadow-md shadow-red-500/25 transition-all inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Converti in Sondaggio Team</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </>
                     )}
 
-                    {/* CASO 2: Status 'converted_to_poll' -> Visualizza sondaggio o Conferma Finale */}
+                    {/* CASO 2: Status 'converted_to_poll' -> Visualizza sondaggio, Non Confermare o Conferma Finale */}
                     {req.status === 'converted_to_poll' && (
                       <>
                         {linkedEvent && onOpenEventDetail && (
@@ -442,6 +532,20 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
                             className="py-2 px-3 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer"
                           >
                             <span>Vedi Voti Team ({linkedEvent.status})</span>
+                          </button>
+                        )}
+
+                        {onRejectRequest && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRejectingRequest(req);
+                              setRejectionReason('');
+                            }}
+                            className="py-2 px-3 rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50/70 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/60 text-red-700 dark:text-red-300 text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Non Confermare</span>
                           </button>
                         )}
 
@@ -461,9 +565,32 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
 
                     {/* CASO 3: Status 'confirmed' */}
                     {req.status === 'confirmed' && (
-                      <span className="text-xs font-semibold text-green-600 dark:text-green-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Flusso Completato</span>
+                      <>
+                        <span className="text-xs font-semibold text-green-600 dark:text-green-400 flex items-center gap-1">
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Confermata</span>
+                        </span>
+                        {onRejectRequest && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRejectingRequest(req);
+                              setRejectionReason('');
+                            }}
+                            className="py-1.5 px-3 rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50/70 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/60 text-red-700 dark:text-red-300 text-xs font-bold transition-all inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Annulla Call</span>
+                          </button>
+                        )}
+                      </>
+                    )}
+
+                    {/* CASO 4: Status 'rejected' */}
+                    {req.status === 'rejected' && (
+                      <span className="text-xs font-semibold text-red-600 dark:text-red-400 flex items-center gap-1">
+                        <XCircle className="w-4 h-4" />
+                        <span>Email inviata al cliente</span>
                       </span>
                     )}
                   </div>
@@ -504,11 +631,11 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
             <ul className="text-xs space-y-1.5 text-neutral-700 dark:text-neutral-300 bg-neutral-50 dark:bg-neutral-950 p-3 rounded-2xl border border-neutral-200 dark:border-neutral-800">
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#f23e2e]" />
-                <strong>A) Inserimento Calendario:</strong> Inserisce l'evento nei calendari con generazione Google Meet.
+                <strong>A) Calendario Team Interno:</strong> Inserisce l'evento con Google Meet sui calendari del team JESic (non sul calendario del cliente).
               </li>
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#f23e2e]" />
-                <strong>B) Email Automatica al Cliente:</strong> Invia a <em>{confirmingRequest.contactEmail}</em> l'email brandizzata JESic con link Google Meet e RSVP.
+                <strong>B) Email Automatica al Cliente (Resend):</strong> Invia esclusivamente a <em>{confirmingRequest.contactEmail}</em> l'email ufficiale di conferma con il link Google Meet.
               </li>
             </ul>
 
@@ -616,11 +743,129 @@ export const ClientRequestsDashboard: React.FC<ClientRequestsDashboardProps> = (
 
             <div className="p-3 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 flex justify-between items-center text-xs">
               <span className="text-neutral-500 text-[11px]">
-                Brand identity: Rosso JESic #f23e2e &bull; Nodemailer / SendGrid compatibile
+                Brand identity: Rosso JESic #f23e2e &bull; Invio tramite Resend
               </span>
               <button
                 type="button"
                 onClick={() => setPreviewEmailData(null)}
+                className="py-1.5 px-4 rounded-xl bg-neutral-900 dark:bg-neutral-800 text-white text-xs font-bold cursor-pointer"
+              >
+                Chiudi Anteprima
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE RIFIUTO / ANNULLAMENTO RICHIESTA CLIENTE */}
+      {rejectingRequest && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-neutral-200 dark:border-neutral-800 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-start justify-between">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-red-500">
+                  {rejectingRequest.status === 'confirmed' ? 'Annullamento Call Confermata' : 'Richiesta Non Confermata'}
+                </span>
+                <h3 className="text-lg font-black text-neutral-900 dark:text-white">
+                  {rejectingRequest.status === 'confirmed'
+                    ? `Annulla call con ${rejectingRequest.companyName}`
+                    : `Non confermare la richiesta di ${rejectingRequest.companyName}`}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRejectingRequest(null)}
+                className="w-8 h-8 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white flex items-center justify-center cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            <p className="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
+              Verrà inviata un'email tramite Resend <strong className="text-neutral-900 dark:text-white">esclusivamente al cliente</strong> ({rejectingRequest.contactEmail}) per comunicare la mancata conferma{rejectingRequest.status === 'confirmed' ? " o l'annullamento dell'incontro" : ''}. Eventuali eventi interni del team su Google Calendar verranno rimossi automaticamente.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">
+                Nota o motivazione per il cliente (opzionale):
+              </label>
+              <textarea
+                rows={3}
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="Es. Indisponibilità nelle fasce orarie proposte, invitiamo a selezionare nuovi slot..."
+                className="w-full rounded-2xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 p-3 text-xs text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#f23e2e]"
+              />
+            </div>
+
+            <div className="pt-2 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setRejectingRequest(null)}
+                className="flex-1 py-3 px-4 rounded-xl border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all cursor-pointer"
+              >
+                Indietro
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingReject}
+                onClick={handleExecuteReject}
+                className="flex-1 py-3 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-lg shadow-red-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isProcessingReject ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Invio Email...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Invia Email al Cliente</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE ANTEPRIMA EMAIL NON CONFERMA / ANNULLAMENTO */}
+      {previewCancellationData && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
+          <div className="bg-white dark:bg-neutral-900 w-full max-w-2xl max-h-[90vh] rounded-3xl shadow-2xl border border-neutral-200 dark:border-neutral-800 flex flex-col overflow-hidden animate-in fade-in">
+            <div className="p-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-neutral-50 dark:bg-neutral-950">
+              <div>
+                <span className="text-[10px] font-black uppercase text-[#f23e2e] tracking-wider">
+                  Email Esito Negativo / Annullamento (Resend)
+                </span>
+                <h3 className="text-sm font-black text-neutral-900 dark:text-white">
+                  Da: {previewCancellationData.organizerEmail} &rarr; A: {previewCancellationData.contactEmail} ({previewCancellationData.companyName})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewCancellationData(null)}
+                className="w-8 h-8 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:text-black dark:hover:text-white flex items-center justify-center cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 bg-neutral-100 dark:bg-neutral-950">
+              <iframe
+                title="Cancellation Email Preview"
+                srcDoc={generateClientCancellationEmailHtml(previewCancellationData)}
+                className="w-full h-[520px] bg-white rounded-2xl border border-neutral-300 dark:border-neutral-800 shadow-sm"
+              />
+            </div>
+
+            <div className="p-3 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 flex justify-between items-center text-xs">
+              <span className="text-neutral-500 text-[11px]">
+                Brand identity: Rosso JESic #f23e2e &bull; Invio esclusivo al cliente tramite Resend
+              </span>
+              <button
+                type="button"
+                onClick={() => setPreviewCancellationData(null)}
                 className="py-1.5 px-4 rounded-xl bg-neutral-900 dark:bg-neutral-800 text-white text-xs font-bold cursor-pointer"
               >
                 Chiudi Anteprima

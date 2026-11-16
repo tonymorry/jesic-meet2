@@ -144,14 +144,14 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
             }`}
             aria-label="Profilo personale"
           >
-            <div className="relative">
+            <div className="w-6 h-6 rounded-full flex items-center justify-center relative">
               {currentUser?.avatarUrl ? (
                 <img
                   src={currentUser.avatarUrl}
                   alt={currentUser.name}
                   className={`w-5 h-5 rounded-full object-cover transition-all ${
                     currentTab === 'profile'
-                      ? 'ring-2 ring-[#f23e2e] scale-110'
+                      ? 'ring-2 ring-[#f23e2e] ring-offset-1 ring-offset-white dark:ring-offset-[#1e1e1e] scale-105'
                       : 'border border-neutral-300 dark:border-neutral-700'
                   }`}
                 />
