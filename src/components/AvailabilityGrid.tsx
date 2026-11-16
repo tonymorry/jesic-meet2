@@ -175,26 +175,26 @@ export const AvailabilityGrid: React.FC<AvailabilityGridProps> = ({
         <button
           type="button"
           onClick={() => onChangeViewMode?.('group')}
-          className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+          className={`flex-1 py-2.5 md:py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
             viewMode === 'group'
               ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white shadow-xs border border-neutral-200/50 dark:border-neutral-600'
               : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
         >
-          <Users className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+          <Users className="w-4 h-4 md:w-3.5 md:h-3.5 text-red-600 dark:text-red-400" />
           <span>Disponibilità di Gruppo</span>
         </button>
 
         <button
           type="button"
           onClick={() => onChangeViewMode?.('individual')}
-          className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+          className={`flex-1 py-2.5 md:py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
             viewMode === 'individual'
               ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white shadow-xs border border-neutral-200/50 dark:border-neutral-600'
               : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
           }`}
         >
-          <Check className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+          <Check className="w-4 h-4 md:w-3.5 md:h-3.5 text-red-600 dark:text-red-400" />
           <span>La Mia Disponibilità ({mySelectedSlots.length})</span>
         </button>
       </div>

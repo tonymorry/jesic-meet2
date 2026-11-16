@@ -1327,21 +1327,21 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
       {/* Header Chat / Barra Azioni Selezione Messaggio WhatsApp */}
       {selectedMessage ? (
         <div className="px-3 sm:px-4 py-2.5 sm:py-3 bg-neutral-900 text-white border-b border-neutral-800 flex items-center justify-between shadow-md z-30 shrink-0 animate-in fade-in">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
               onClick={() => setSelectedMessage(null)}
-              className="p-1.5 rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+              className="p-2.5 md:p-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
               title="Annulla selezione"
             >
-              <X className="w-5 h-5 stroke-[2.2px]" />
+              <X className="w-5.5 h-5.5 md:w-5 md:h-5 stroke-[2.2px]" />
             </button>
-            <span className="text-xs sm:text-sm font-black tracking-wide">
+            <span className="text-sm md:text-xs sm:text-sm font-black tracking-wide">
               1 selezionato
             </span>
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             {/* Tasto Rispondi */}
             <button
               type="button"
@@ -1350,9 +1350,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                 setSelectedMessage(null);
               }}
               title="Rispondi al messaggio"
-              className="p-2 rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+              className="p-2.5 md:p-2 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
             >
-              <CornerUpLeft className="w-4 h-4" />
+              <CornerUpLeft className="w-5 h-5 md:w-4 md:h-4" />
             </button>
 
             {/* Tasto Copia (se testo presente) */}
@@ -1364,9 +1364,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                   setSelectedMessage(null);
                 }}
                 title="Copia testo"
-                className="p-2 rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                className="p-2.5 md:p-2 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
               >
-                <Copy className="w-4 h-4" />
+                <Copy className="w-5 h-5 md:w-4 md:h-4" />
               </button>
             )}
 
@@ -1378,9 +1378,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                 setSelectedMessage(null);
               }}
               title="Info messaggio (Visualizzazioni)"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-neutral-800 hover:bg-sky-600 active:bg-sky-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
+              className="flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-3 py-2.5 md:px-2.5 md:py-1.5 rounded-xl bg-neutral-800 hover:bg-sky-600 active:bg-sky-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
             >
-              <Info className="w-3.5 h-3.5 text-sky-400" />
+              <Info className="w-4.5 h-4.5 md:w-3.5 md:h-3.5 text-sky-400" />
               <span className="hidden sm:inline">Info</span>
             </button>
 
@@ -1394,9 +1394,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                     setSelectedMessage(null);
                   }}
                   title="Modifica messaggio"
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-neutral-800 hover:bg-[#00a884] active:bg-[#008f6f] text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
+                  className="flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-3 py-2.5 md:px-2.5 md:py-1.5 rounded-xl bg-neutral-800 hover:bg-[#00a884] active:bg-[#008f6f] text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
                 >
-                  <Edit2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <Edit2 className="w-4.5 h-4.5 md:w-3.5 md:h-3.5 text-emerald-400" />
                   <span className="hidden sm:inline">Modifica</span>
                 </button>
 
@@ -1408,9 +1408,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                     handleDeleteMessage(idToDelete);
                   }}
                   title="Elimina per tutti"
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 active:bg-red-800 text-red-400 text-xs font-bold transition-all cursor-pointer shadow-xs"
+                  className="flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-3 py-2.5 md:px-2.5 md:py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 active:bg-red-800 text-red-400 text-xs font-bold transition-all cursor-pointer shadow-xs"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-4.5 h-4.5 md:w-3.5 md:h-3.5" />
                   <span className="hidden sm:inline">Elimina</span>
                 </button>
               </>
@@ -1426,9 +1426,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                   handleDeleteMessage(idToDelete);
                 }}
                 title="Elimina messaggio come Admin"
-                className="p-2 rounded-xl hover:bg-red-950 text-red-400 transition-colors cursor-pointer"
+                className="p-2.5 md:p-2 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl hover:bg-red-950 text-red-400 transition-colors cursor-pointer"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
               </button>
             )}
           </div>
@@ -1451,11 +1451,11 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               <button
                 type="button"
                 onClick={onBackToDashboard}
-                className="p-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-[#f23e2e] md:hidden cursor-pointer shrink-0 transition-colors"
+                className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-[#f23e2e] md:hidden cursor-pointer shrink-0 transition-colors active:scale-95"
                 title="Torna alla Dashboard"
                 aria-label="Torna indietro"
               >
-                <ArrowLeft className="w-4 h-4 stroke-[2.5px]" />
+                <ArrowLeft className="w-5 h-5 stroke-[2.5px]" />
               </button>
             )}
             <div
@@ -1724,12 +1724,12 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                           onClick={() =>
                             handleTogglePlayAudio(msg.id, msg.attachment!.url)
                           }
-                          className="w-9 h-9 rounded-full bg-[#00a884] hover:bg-[#008f6f] text-white flex items-center justify-center shrink-0 shadow-2xs cursor-pointer active:scale-95 transition-transform"
+                          className="w-11 h-11 md:w-9 md:h-9 rounded-full bg-[#00a884] hover:bg-[#008f6f] text-white flex items-center justify-center shrink-0 shadow-2xs cursor-pointer active:scale-95 transition-transform"
                         >
                           {isPlayingThisAudio ? (
-                            <Pause className="w-4 h-4 fill-white" />
+                            <Pause className="w-5 h-5 md:w-4 md:h-4 fill-white" />
                           ) : (
-                            <Play className="w-4 h-4 fill-white ml-0.5" />
+                            <Play className="w-5 h-5 md:w-4 md:h-4 fill-white ml-0.5" />
                           )}
                         </button>
 
@@ -1786,10 +1786,10 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                           download={msg.attachment.name || 'documento'}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="p-2 rounded-xl bg-neutral-200 dark:bg-neutral-800 hover:bg-[#f23e2e] hover:text-white text-neutral-700 dark:text-neutral-200 transition-colors shrink-0 cursor-pointer"
+                          className="p-2.5 md:p-2 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl bg-neutral-200 dark:bg-neutral-800 hover:bg-[#f23e2e] hover:text-white text-neutral-700 dark:text-neutral-200 transition-colors shrink-0 cursor-pointer"
                           title="Scarica file"
                         >
-                          <Download className="w-4 h-4" />
+                          <Download className="w-5 h-5 md:w-4 md:h-4" />
                         </a>
                       </div>
                     )}
@@ -1813,12 +1813,12 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                             }
                           }}
                         />
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={handleCancelEdit}
                             disabled={isSavingEdit}
-                            className="px-2 py-1 rounded-lg text-[10px] font-bold bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 cursor-pointer"
+                            className="px-3.5 py-2 md:px-2 md:py-1 rounded-lg text-xs md:text-[10px] font-bold bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 cursor-pointer"
                           >
                             Annulla
                           </button>
@@ -1826,9 +1826,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                             type="button"
                             onClick={() => handleSaveEdit(msg.id)}
                             disabled={isSavingEdit || !editingText.trim()}
-                            className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-[#00a884] hover:bg-[#008f6f] text-white flex items-center gap-1 cursor-pointer shadow-xs disabled:opacity-50"
+                            className="px-4 py-2 md:px-2.5 md:py-1 rounded-lg text-xs md:text-[10px] font-black bg-[#00a884] hover:bg-[#008f6f] text-white flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
                           >
-                            <Check className="w-3 h-3 stroke-[3px]" />
+                            <Check className="w-3.5 h-3.5 md:w-3 md:h-3 stroke-[3px]" />
                             <span>Salva</span>
                           </button>
                         </div>
@@ -1962,9 +1962,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
           <button
             type="button"
             onClick={() => setReplyingTo(null)}
-            className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+            className="p-2.5 md:p-1 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5 md:w-4 md:h-4" />
           </button>
         </div>
       )}
@@ -2014,18 +2014,18 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
           <button
             type="button"
             onClick={() => setPendingAttachment(null)}
-            className="p-1 rounded-lg text-neutral-400 hover:text-red-500"
+            className="p-2.5 md:p-1 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl text-neutral-400 hover:text-red-500 cursor-pointer"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5 md:w-4 md:h-4" />
           </button>
         </div>
       )}
 
       {/* BARRA INSERIMENTO MESSAGGIO & REGISTRAZIONE VOCALE */}
-      <div className="w-full max-w-full px-2.5 py-2 sm:px-3.5 sm:py-3 bg-white dark:bg-neutral-900 border-t border-neutral-200/80 dark:border-neutral-800 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 shrink-0 box-border overflow-hidden">
+      <div className="w-full max-w-full px-2.5 py-2.5 sm:px-3.5 sm:py-3 bg-white dark:bg-neutral-900 border-t border-neutral-200/80 dark:border-neutral-800 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 shrink-0 box-border overflow-hidden">
         {isRecording ? (
           /* Interfaccia Registratore Vocale in Corso con limite 60 secondi */
-          <div className="w-full max-w-full flex items-center justify-between gap-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 px-3.5 py-2 min-h-[44px] rounded-2xl animate-pulse box-border">
+          <div className="w-full max-w-full flex items-center justify-between gap-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 px-3.5 py-2 min-h-[48px] rounded-2xl animate-pulse box-border">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping shrink-0" />
               <span className={`text-xs font-mono font-bold shrink-0 ${recordingSeconds >= 50 ? 'text-amber-600 dark:text-amber-400 font-black' : 'text-red-600 dark:text-red-400'}`}>
@@ -2036,22 +2036,22 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={cancelRecording}
-                className="w-9 h-9 rounded-xl bg-white dark:bg-neutral-800 text-neutral-600 hover:text-red-600 shadow-2xs flex items-center justify-center cursor-pointer transition-colors"
+                className="w-11 h-11 md:w-9 md:h-9 rounded-xl bg-white dark:bg-neutral-800 text-neutral-600 hover:text-red-600 shadow-2xs flex items-center justify-center cursor-pointer transition-colors active:scale-95"
                 title="Annulla registrazione"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
               </button>
               <button
                 type="button"
                 onClick={stopAndSendRecording}
-                className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-[#00a884] hover:bg-[#008f6f] text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95 transition-all"
+                className="px-4 py-2.5 md:px-3.5 md:py-2 rounded-xl bg-[#00a884] hover:bg-[#008f6f] text-white text-sm md:text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95 transition-all"
                 title="Invia nota vocale"
               >
-                <Send className="w-3.5 h-3.5" />
+                <Send className="w-4.5 h-4.5 md:w-3.5 md:h-3.5" />
                 <span>Invia</span>
               </button>
             </div>
@@ -2064,20 +2064,20 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
             <button
               type="button"
               onClick={() => imageInputRef.current?.click()}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-neutral-500 hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0"
+              className="w-11 h-11 md:w-10 md:h-10 rounded-2xl flex items-center justify-center text-neutral-500 hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0 active:scale-95"
               title="Invia Foto (Compressione automatica ultra-leggera)"
             >
-              <ImageIcon className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+              <ImageIcon className="w-5.5 h-5.5 md:w-5 md:h-5" />
             </button>
 
             {/* Tasto Invia File / Documento */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-neutral-500 hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0"
+              className="w-11 h-11 md:w-10 md:h-10 rounded-2xl flex items-center justify-center text-neutral-500 hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer shrink-0 active:scale-95"
               title="Invia Documento o File"
             >
-              <Paperclip className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+              <Paperclip className="w-5.5 h-5.5 md:w-5 md:h-5" />
             </button>
 
             {/* Campo Testo (con min-w-0 per evitare overflow flexbox su mobile, mai disabilitato per permettere digitazione continua) */}
@@ -2086,26 +2086,26 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               placeholder={`Scrivi un messaggio in ${contextName}...`}
-              className="flex-1 min-w-0 min-h-[44px] sm:min-h-[44px] px-3.5 py-2.5 sm:px-4 bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-2xl text-xs sm:text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#f23e2e] transition-all"
+              className="flex-1 min-w-0 min-h-[46px] md:min-h-[44px] px-3.5 py-2.5 sm:px-4 bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-2xl text-sm md:text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#f23e2e] transition-all"
             />
 
             {/* Se c'è testo o allegato pronto: Tasto INVIA. Altrimenti: Tasto MICROFONO */}
             {inputText.trim() || pendingAttachment ? (
               <button
                 type="submit"
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#00a884] hover:bg-[#008f6f] text-white shadow-md shadow-emerald-600/30 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
+                className="w-12 h-12 md:w-11 md:h-11 rounded-2xl bg-[#00a884] hover:bg-[#008f6f] text-white shadow-md shadow-emerald-600/30 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
                 aria-label="Invia messaggio istantaneamente"
               >
-                <Send className="w-4.5 h-4.5 sm:w-5 sm:h-5 stroke-[2.2px]" />
+                <Send className="w-5.5 h-5.5 md:w-5 md:h-5 stroke-[2.2px]" />
               </button>
             ) : (
               <button
                 type="button"
                 onClick={startRecording}
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-neutral-100 dark:bg-neutral-800 hover:bg-[#00a884] hover:text-white text-neutral-600 dark:text-neutral-300 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0 shadow-2xs"
+                className="w-12 h-12 md:w-11 md:h-11 rounded-2xl bg-neutral-100 dark:bg-neutral-800 hover:bg-[#00a884] hover:text-white text-neutral-600 dark:text-neutral-300 transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0 shadow-2xs"
                 title="Registra nota vocale (max 60s, compressione voce ultra-leggera)"
               >
-                <Mic className="w-4.5 h-4.5 sm:w-5 sm:h-5 stroke-[2.2px]" />
+                <Mic className="w-5.5 h-5.5 md:w-5 md:h-5 stroke-[2.2px]" />
               </button>
             )}
           </form>
@@ -2125,7 +2125,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
             <button
               type="button"
               onClick={() => setPreviewImage(null)}
-              className="absolute -top-10 right-0 text-white/80 hover:text-white p-1"
+              className="absolute -top-12 right-0 p-2.5 md:p-1 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-full bg-black/50 md:bg-transparent text-white/90 hover:text-white cursor-pointer"
             >
               <X className="w-6 h-6" />
             </button>
@@ -2205,9 +2205,9 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setInfoModalMessage(null)}
-                  className="p-1.5 rounded-xl hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors cursor-pointer"
+                  className="p-2.5 md:p-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors cursor-pointer"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-5.5 h-5.5 md:w-5 md:h-5" />
                 </button>
               </div>
 
@@ -2371,7 +2371,7 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setInfoModalMessage(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 cursor-pointer"
+                  className="px-5 py-3 md:px-4 md:py-2 rounded-xl text-sm md:text-xs font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 cursor-pointer"
                 >
                   Chiudi
                 </button>

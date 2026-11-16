@@ -119,11 +119,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 <button
                   type="button"
                   onClick={onBackToGroups}
-                  className="p-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-[#f23e2e] dark:hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all flex items-center justify-center cursor-pointer active:scale-95"
+                  className="p-2.5 md:p-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-[#f23e2e] dark:hover:text-[#f23e2e] hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all flex items-center justify-center cursor-pointer active:scale-95"
                   title="Torna alla lista dei tuoi gruppi"
                   aria-label="Torna indietro"
                 >
-                  <ArrowLeft className="w-5 h-5 text-[#f23e2e] stroke-[2.5px]" />
+                  <ArrowLeft className="w-5.5 h-5.5 md:w-5 md:h-5 text-[#f23e2e] stroke-[2.5px]" />
                 </button>
               )}
             </div>
@@ -371,16 +371,16 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             onClick={handleThemeClick}
             aria-label={`Tema attuale: ${currentLabel}. Clicca per passare a ${nextLabel}`}
             title={`Tema attuale: ${currentLabel} (Clicca per passare a ${nextLabel})`}
-            className={`w-8 h-8 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer shadow-2xs hover:scale-105 active:scale-95 ${
+            className={`w-10 h-10 md:w-8 md:h-8 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer shadow-2xs hover:scale-105 active:scale-95 ${
               currentTheme === 'dark'
                 ? 'bg-neutral-800 border-neutral-700 hover:border-neutral-600 text-neutral-200'
                 : 'bg-amber-50/90 border-amber-300/80 hover:border-amber-400 text-amber-600'
             }`}
           >
             {currentTheme === 'light' ? (
-              <Sun className="w-4 h-4 text-amber-500 fill-amber-500/20 transition-transform duration-300 hover:rotate-45" />
+              <Sun className="w-5 h-5 md:w-4 md:h-4 text-amber-500 fill-amber-500/20 transition-transform duration-300 hover:rotate-45" />
             ) : (
-              <Moon className="w-4 h-4 text-neutral-300 fill-neutral-300/20 transition-transform duration-300 hover:-rotate-12" />
+              <Moon className="w-5 h-5 md:w-4 md:h-4 text-neutral-300 fill-neutral-300/20 transition-transform duration-300 hover:-rotate-12" />
             )}
           </button>
 
@@ -388,7 +388,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           <button
             type="button"
             onClick={onNavigateToProfile}
-            className={`flex p-0.5 rounded-full border transition-all cursor-pointer hover:scale-105 active:scale-95 shrink-0 ${
+            className={`flex items-center justify-center p-1 md:p-0.5 rounded-full border transition-all cursor-pointer hover:scale-105 active:scale-95 shrink-0 ${
               currentTab === 'profile'
                 ? 'ring-2 ring-[#f23e2e] border-[#f23e2e]'
                 : 'border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 bg-neutral-50 dark:bg-neutral-800'

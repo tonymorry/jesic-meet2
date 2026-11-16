@@ -877,7 +877,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                     {/* Griglia giorni del mese */}
                     <div className="grid grid-cols-7 gap-1">
                       {Array.from({ length: startDayIndex }).map((_, i) => (
-                        <div key={`empty-${i}`} className="h-7" />
+                        <div key={`empty-${i}`} className="h-9 sm:h-7" />
                       ))}
                       {Array.from({ length: daysInMonth }).map((_, i) => {
                         const dayNum = i + 1;
@@ -890,6 +890,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                           <button
                             type="button"
                             key={dateStr}
+                            data-mobile-compact="true"
                             disabled={isPast}
                             onClick={() => {
                               if (isSelected) {
@@ -898,7 +899,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                                 handleToggleCalendarDate(dateStr);
                               }
                             }}
-                            className={`h-7 rounded-xl text-xs font-bold transition-all flex items-center justify-center cursor-pointer relative ${
+                            className={`h-9 sm:h-7 rounded-xl text-xs font-bold transition-all flex items-center justify-center cursor-pointer relative ${
                               isSelected
                                 ? 'bg-red-600 text-white font-black shadow-xs ring-2 ring-red-400/40 scale-105'
                                 : isPast

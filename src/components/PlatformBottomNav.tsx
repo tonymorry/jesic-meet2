@@ -34,13 +34,13 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
       className="fixed bottom-0 left-0 right-0 z-40 max-w-md mx-auto sm:max-w-xl md:max-w-2xl"
     >
       <div className="relative bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-md border-t border-neutral-200/90 dark:border-neutral-800 px-4 py-1.5 shadow-[0_-4px_24px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.5)]">
-        <div className="grid grid-cols-4 items-center h-14">
+        <div className="grid grid-cols-4 items-center h-[68px] md:h-14">
           
           {/* 1. SINISTRA: GRUPPI */}
           <button
             type="button"
             onClick={() => onSelectTab('groups')}
-            className={`flex flex-col items-center justify-center py-1 transition-all active:scale-95 cursor-pointer relative ${
+            className={`flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 cursor-pointer relative ${
               currentTab === 'groups'
                 ? 'text-[#f23e2e]'
                 : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -49,7 +49,7 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
           >
             <div className="relative">
               <Users
-                className={`w-5 h-5 transition-transform ${
+                className={`w-6 h-6 md:w-5 md:h-5 transition-transform ${
                   currentTab === 'groups' ? 'stroke-[2.5px] scale-110 text-[#f23e2e]' : 'stroke-[1.8px]'
                 }`}
               />
@@ -60,7 +60,7 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
               )}
             </div>
             <span
-              className={`text-[10px] mt-1 tracking-tight leading-none ${
+              className={`text-[11px] md:text-[10px] mt-1 tracking-tight leading-none ${
                 currentTab === 'groups'
                   ? 'font-black text-[#f23e2e]'
                   : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -74,7 +74,7 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
           <button
             type="button"
             onClick={() => onSelectTab('polls')}
-            className={`flex flex-col items-center justify-center py-1 transition-all active:scale-95 cursor-pointer relative ${
+            className={`flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 cursor-pointer relative ${
               currentTab === 'polls'
                 ? 'text-[#f23e2e]'
                 : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -83,7 +83,7 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
           >
             <div className="relative">
               <BarChart3
-                className={`w-5 h-5 transition-transform ${
+                className={`w-6 h-6 md:w-5 md:h-5 transition-transform ${
                   currentTab === 'polls' ? 'stroke-[2.5px]' : 'stroke-[1.8px]'
                 }`}
               />
@@ -94,7 +94,7 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
               )}
             </div>
             <span
-              className={`text-[10px] mt-0.5 tracking-tight leading-none ${
+              className={`text-[11px] md:text-[10px] mt-0.5 tracking-tight leading-none ${
                 currentTab === 'polls'
                   ? 'font-black text-[#f23e2e]'
                   : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -108,7 +108,7 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
           <button
             type="button"
             onClick={() => onSelectTab('calendar')}
-            className={`flex flex-col items-center justify-center py-1 transition-all active:scale-95 cursor-pointer relative ${
+            className={`flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 cursor-pointer relative ${
               currentTab === 'calendar'
                 ? 'text-[#f23e2e]'
                 : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -117,13 +117,13 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
           >
             <div className="relative">
               <Calendar
-                className={`w-5 h-5 transition-transform ${
+                className={`w-6 h-6 md:w-5 md:h-5 transition-transform ${
                   currentTab === 'calendar' ? 'stroke-[2.5px] scale-110 text-[#f23e2e]' : 'stroke-[1.8px]'
                 }`}
               />
             </div>
             <span
-              className={`text-[10px] mt-1 tracking-tight leading-none ${
+              className={`text-[11px] md:text-[10px] mt-1 tracking-tight leading-none ${
                 currentTab === 'calendar'
                   ? 'font-black text-[#f23e2e]'
                   : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -137,19 +137,19 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
           <button
             type="button"
             onClick={() => onSelectTab('profile')}
-            className={`flex flex-col items-center justify-center py-1 transition-all active:scale-95 cursor-pointer relative ${
+            className={`flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 cursor-pointer relative ${
               currentTab === 'profile'
                 ? 'text-[#f23e2e]'
                 : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
             }`}
             aria-label="Profilo personale"
           >
-            <div className="w-6 h-6 rounded-full flex items-center justify-center relative">
+            <div className="w-7 h-7 md:w-6 md:h-6 rounded-full flex items-center justify-center relative">
               {currentUser?.avatarUrl ? (
                 <img
                   src={currentUser.avatarUrl}
                   alt={currentUser.name}
-                  className={`w-5 h-5 rounded-full object-cover transition-all ${
+                  className={`w-6 h-6 md:w-5 md:h-5 rounded-full object-cover transition-all ${
                     currentTab === 'profile'
                       ? 'ring-2 ring-[#f23e2e] ring-offset-1 ring-offset-white dark:ring-offset-[#1e1e1e] scale-105'
                       : 'border border-neutral-300 dark:border-neutral-700'
@@ -157,14 +157,14 @@ export const PlatformBottomNav: React.FC<PlatformBottomNavProps> = ({
                 />
               ) : (
                 <UserIcon
-                  className={`w-5 h-5 transition-transform ${
+                  className={`w-6 h-6 md:w-5 md:h-5 transition-transform ${
                     currentTab === 'profile' ? 'stroke-[2.5px] scale-110 text-[#f23e2e]' : 'stroke-[1.8px]'
                   }`}
                 />
               )}
             </div>
             <span
-              className={`text-[10px] mt-1 tracking-tight leading-none ${
+              className={`text-[11px] md:text-[10px] mt-1 tracking-tight leading-none ${
                 currentTab === 'profile'
                   ? 'font-black text-[#f23e2e]'
                   : 'font-semibold text-neutral-500 dark:text-neutral-400'

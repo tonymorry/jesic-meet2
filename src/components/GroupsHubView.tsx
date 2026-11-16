@@ -232,7 +232,7 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
           </div>
 
           {/* Bottoni Azione Rapida */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0 w-full sm:w-auto">
             <button
               type="button"
               onClick={() => {
@@ -240,9 +240,9 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
                 setJoinError(null);
                 setIsJoinModalOpen(true);
               }}
-              className="px-3.5 py-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
+              className="flex-1 sm:flex-initial justify-center px-4 py-3 md:py-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-sm md:text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
             >
-              <KeyRound className="w-4 h-4 text-[#f23e2e]" />
+              <KeyRound className="w-4.5 h-4.5 md:w-4 md:h-4 text-[#f23e2e]" />
               <span>Entra con Codice</span>
             </button>
 
@@ -254,9 +254,9 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
                 setIsPublicGroup(false);
                 setIsCreateModalOpen(true);
               }}
-              className="px-4 py-2.5 rounded-2xl bg-[#f23e2e] hover:bg-red-600 text-white text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-red-600/25 active:scale-95"
+              className="flex-1 sm:flex-initial justify-center px-4 py-3 md:py-2.5 rounded-2xl bg-[#f23e2e] hover:bg-red-600 text-white text-sm md:text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-red-600/25 active:scale-95"
             >
-              <Plus className="w-4 h-4 stroke-[3px]" />
+              <Plus className="w-4.5 h-4.5 md:w-4 md:h-4 stroke-[3px]" />
               <span>Crea Gruppo</span>
             </button>
           </div>

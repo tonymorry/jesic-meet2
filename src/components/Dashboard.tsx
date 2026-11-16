@@ -124,7 +124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('my_invites')}
-          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`flex-1 py-3 md:py-2.5 px-3.5 rounded-xl text-sm md:text-xs font-bold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'my_invites'
               ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-black'
               : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -132,7 +132,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         >
           <span>I miei inviti</span>
           <span
-            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+            className={`text-[11px] md:text-[10px] px-2 md:px-1.5 py-0.5 md:py-0.2 rounded-full font-bold ${
               pendingInvites.length > 0
                 ? 'bg-red-600 text-white font-black'
                 : activeTab === 'my_invites'
@@ -147,7 +147,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('created_by_me')}
-          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`flex-1 py-3 md:py-2.5 px-3.5 rounded-xl text-sm md:text-xs font-bold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'created_by_me'
               ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-black'
               : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -155,7 +155,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         >
           <span>Creati da me</span>
           <span
-            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+            className={`text-[11px] md:text-[10px] px-2 md:px-1.5 py-0.5 md:py-0.2 rounded-full font-bold ${
               activeTab === 'created_by_me'
                 ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 font-black'
                 : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 font-bold'
@@ -187,7 +187,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <button
                 type="button"
                 onClick={onOpenCreateModal}
-                className="py-2.5 px-4 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-red-600/30 cursor-pointer"
+                className="py-3 md:py-2.5 px-5 md:px-4 bg-red-600 hover:bg-red-500 text-white rounded-xl text-sm md:text-xs font-bold transition-all shadow-md shadow-red-600/30 cursor-pointer"
               >
                 + Avvia Nuovo Sondaggio
               </button>
@@ -375,7 +375,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                         <button
                           type="button"
-                          className="py-1.5 px-3 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
+                          className="py-2.5 px-4 md:py-1.5 md:px-3 bg-red-600 hover:bg-red-500 text-white text-sm md:text-xs font-bold rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
                         >
                           Vota Ora
                         </button>

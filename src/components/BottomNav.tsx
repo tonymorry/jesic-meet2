@@ -70,12 +70,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             CASO 1: LIVELLO PIATTAFORMA (FUORI DA UN GRUPPO)
            ==================================================================== */}
         {!isInsideGroup ? (
-          <div className="flex items-center justify-around h-16 sm:h-18">
+          <div className="flex items-center justify-around h-[72px] sm:h-18">
             {/* 1. "Gruppi" */}
             <button
               type="button"
               onClick={() => onSelectTab('groups')}
-              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 cursor-pointer ${
+              className={`flex-1 flex flex-col items-center justify-center py-2 transition-all active:scale-95 cursor-pointer ${
                 currentTab === 'groups'
                   ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -83,12 +83,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               aria-label="Gruppi"
             >
               <Users
-                className={`w-6 h-6 transition-transform ${
+                className={`w-6.5 h-6.5 transition-transform ${
                   currentTab === 'groups' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
                 }`}
               />
               <span
-                className={`text-[11px] mt-1 tracking-tight leading-none ${
+                className={`text-[11.5px] mt-1 tracking-tight leading-none ${
                   currentTab === 'groups'
                     ? 'font-black text-[#f23e2e]'
                     : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -102,7 +102,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('polls')}
-              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 relative cursor-pointer ${
+              className={`flex-1 flex flex-col items-center justify-center py-2 transition-all active:scale-95 relative cursor-pointer ${
                 currentTab === 'polls'
                   ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -111,18 +111,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             >
               <div className="relative">
                 <Inbox
-                  className={`w-6 h-6 transition-transform ${
+                  className={`w-6.5 h-6.5 transition-transform ${
                     currentTab === 'polls' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
                   }`}
                 />
                 {pendingInvitesCount > 0 && (
-                  <span className="absolute -top-1 -right-2.5 min-w-[17px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[9.5px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs">
+                  <span className="absolute -top-1 -right-2.5 min-w-[18px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs">
                     {pendingInvitesCount}
                   </span>
                 )}
               </div>
               <span
-                className={`text-[11px] mt-1 tracking-tight leading-none ${
+                className={`text-[11.5px] mt-1 tracking-tight leading-none ${
                   currentTab === 'polls'
                     ? 'font-black text-[#f23e2e]'
                     : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -136,7 +136,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('calendar')}
-              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 cursor-pointer ${
+              className={`flex-1 flex flex-col items-center justify-center py-2 transition-all active:scale-95 cursor-pointer ${
                 currentTab === 'calendar'
                   ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -144,12 +144,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               aria-label="Calendario eventi fuori dai gruppi"
             >
               <Calendar
-                className={`w-6 h-6 transition-transform ${
+                className={`w-6.5 h-6.5 transition-transform ${
                   currentTab === 'calendar' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
                 }`}
               />
               <span
-                className={`text-[11px] mt-1 tracking-tight leading-none ${
+                className={`text-[11.5px] mt-1 tracking-tight leading-none ${
                   currentTab === 'calendar'
                     ? 'font-black text-[#f23e2e]'
                     : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -163,7 +163,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('profile')}
-              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 cursor-pointer ${
+              className={`flex-1 flex flex-col items-center justify-center py-2 transition-all active:scale-95 cursor-pointer ${
                 currentTab === 'profile'
                   ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -171,7 +171,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               aria-label="Profilo personale"
             >
               <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-all ${
                   currentTab === 'profile'
                     ? 'ring-2 ring-[#f23e2e] ring-offset-1 ring-offset-white dark:ring-offset-neutral-900 scale-105'
                     : ''
@@ -180,7 +180,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                 <UserAvatar user={currentUser} size="xs" className="!flex items-center justify-center" />
               </div>
               <span
-                className={`text-[11px] mt-1 tracking-tight leading-none ${
+                className={`text-[11.5px] mt-1 tracking-tight leading-none ${
                   currentTab === 'profile'
                     ? 'font-black text-[#f23e2e]'
                     : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -196,12 +196,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
              (Menu Hamburger spostato in alto a sinistra, Profilo in alto a destra)
              Barra pulita, ingrandita e comoda con: Sondaggi, Eventi, [+], [Richieste], Calendario, Chat
              ==================================================================== */
-          <div className="flex items-center justify-around h-16 sm:h-18">
+          <div className="flex items-center justify-around h-[72px] sm:h-18">
             {/* 1. Sondaggi Gruppo */}
             <button
               type="button"
               onClick={() => onSelectTab('dashboard')}
-              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 relative cursor-pointer ${
+              className={`flex-1 flex flex-col items-center justify-center py-2 transition-all active:scale-95 relative cursor-pointer ${
                 currentTab === 'dashboard'
                   ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -210,18 +210,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             >
               <div className="relative">
                 <Inbox
-                  className={`w-6 h-6 transition-transform ${
+                  className={`w-6.5 h-6.5 transition-transform ${
                     currentTab === 'dashboard' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
                   }`}
                 />
                 {pendingGroupPollsCount > 0 && (
-                  <span className="absolute -top-1 -right-2.5 min-w-[17px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[9.5px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs">
+                  <span className="absolute -top-1 -right-2.5 min-w-[18px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs">
                     {pendingGroupPollsCount}
                   </span>
                 )}
               </div>
               <span
-                className={`text-[10.5px] mt-1 tracking-tight leading-none ${
+                className={`text-[11px] mt-1 tracking-tight leading-none ${
                   currentTab === 'dashboard'
                     ? 'font-black text-[#f23e2e]'
                     : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -235,7 +235,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('events')}
-              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 relative cursor-pointer ${
+              className={`flex-1 flex flex-col items-center justify-center py-2 transition-all active:scale-95 relative cursor-pointer ${
                 currentTab === 'events'
                   ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -244,18 +244,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             >
               <div className="relative">
                 <ClipboardList
-                  className={`w-6 h-6 transition-transform ${
+                  className={`w-6.5 h-6.5 transition-transform ${
                     currentTab === 'events' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
                   }`}
                 />
                 {pendingOfficialEventsCount > 0 && (
-                  <span className="absolute -top-1 -right-2.5 min-w-[17px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[9.5px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs">
+                  <span className="absolute -top-1 -right-2.5 min-w-[18px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs">
                     {pendingOfficialEventsCount}
                   </span>
                 )}
               </div>
               <span
-                className={`text-[10.5px] mt-1 tracking-tight leading-none ${
+                className={`text-[11px] mt-1 tracking-tight leading-none ${
                   currentTab === 'events'
                     ? 'font-black text-[#f23e2e]'
                     : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -272,9 +272,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                   type="button"
                   onClick={onOpenCreateMenu}
                   aria-label="Crea nuovo sondaggio o evento"
-                  className="w-13 h-13 sm:w-14 sm:h-14 rounded-full bg-[#f23e2e] hover:bg-red-600 text-white shadow-xl shadow-red-600/40 hover:shadow-red-600/60 flex items-center justify-center transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer ring-4 ring-white dark:ring-neutral-900"
+                  className="w-14 h-14 sm:w-15 sm:h-15 rounded-full bg-[#f23e2e] hover:bg-red-600 text-white shadow-xl shadow-red-600/40 hover:shadow-red-600/60 flex items-center justify-center transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer ring-4 ring-white dark:ring-neutral-900"
                 >
-                  <Plus className="w-6.5 h-6.5 stroke-[3px]" />
+                  <Plus className="w-7 h-7 stroke-[3px]" />
                 </button>
               </div>
             )}
@@ -284,7 +284,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('requests')}
-                className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 relative cursor-pointer ${
+                className={`flex-1 flex flex-col items-center justify-center py-2 transition-all active:scale-95 relative cursor-pointer ${
                   currentTab === 'requests'
                     ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                     : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -293,18 +293,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               >
                 <div className="relative">
                   <Briefcase
-                    className={`w-6 h-6 transition-transform ${
+                    className={`w-6.5 h-6.5 transition-transform ${
                       currentTab === 'requests' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
                     }`}
                   />
                   {pendingClientRequestsCount > 0 && (
-                    <span className="absolute -top-1 -right-2.5 min-w-[17px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[9.5px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs animate-pulse">
+                    <span className="absolute -top-1 -right-2.5 min-w-[18px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs animate-pulse">
                       {pendingClientRequestsCount}
                     </span>
                   )}
                 </div>
                 <span
-                  className={`text-[10.5px] mt-1 tracking-tight leading-none ${
+                  className={`text-[11px] mt-1 tracking-tight leading-none ${
                     currentTab === 'requests'
                       ? 'font-black text-[#f23e2e]'
                       : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -319,7 +319,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('calendar')}
-              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 cursor-pointer ${
+              className={`flex-1 flex flex-col items-center justify-center py-2 transition-all active:scale-95 cursor-pointer ${
                 currentTab === 'calendar'
                   ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -327,12 +327,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               aria-label="Calendario impegni"
             >
               <Calendar
-                className={`w-6 h-6 transition-transform ${
+                className={`w-6.5 h-6.5 transition-transform ${
                   currentTab === 'calendar' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
                 }`}
               />
               <span
-                className={`text-[10.5px] mt-1 tracking-tight leading-none ${
+                className={`text-[11px] mt-1 tracking-tight leading-none ${
                   currentTab === 'calendar'
                     ? 'font-black text-[#f23e2e]'
                     : 'font-semibold text-neutral-500 dark:text-neutral-400'
@@ -346,7 +346,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('chat')}
-              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 relative cursor-pointer ${
+              className={`flex-1 flex flex-col items-center justify-center py-2 transition-all active:scale-95 relative cursor-pointer ${
                 currentTab === 'chat'
                   ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -355,18 +355,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             >
               <div className="relative">
                 <MessageSquare
-                  className={`w-6 h-6 transition-transform ${
+                  className={`w-6.5 h-6.5 transition-transform ${
                     currentTab === 'chat' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
                   }`}
                 />
                 {unreadChatCount > 0 && (
-                  <span className="absolute -top-1 -right-2.5 min-w-[17px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[9.5px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs animate-pulse">
+                  <span className="absolute -top-1 -right-2.5 min-w-[18px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs animate-pulse">
                     {unreadChatCount > 99 ? '99+' : unreadChatCount}
                   </span>
                 )}
               </div>
               <span
-                className={`text-[10.5px] mt-1 tracking-tight leading-none ${
+                className={`text-[11px] mt-1 tracking-tight leading-none ${
                   currentTab === 'chat'
                     ? 'font-black text-[#f23e2e]'
                     : 'font-semibold text-neutral-500 dark:text-neutral-400'

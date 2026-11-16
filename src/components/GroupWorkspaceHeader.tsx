@@ -250,11 +250,11 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
               <button
                 type="button"
                 onClick={onToggleSubgroupsMenu}
-                className="relative p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-[#f23e2e] transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0 border border-neutral-200/60 dark:border-neutral-700/60 shadow-2xs"
+                className="relative p-2.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-xl sm:rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-[#f23e2e] transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0 border border-neutral-200/60 dark:border-neutral-700/60 shadow-2xs"
                 title={activeSubgroup ? `Cartella attiva: ${activeSubgroup.name} • Apri Sottogruppi` : 'Menu Sottogruppi e Cartelle'}
                 aria-label="Menu Sottogruppi e Cartelle"
               >
-                <Menu className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5px]" />
+                <Menu className="w-5 h-5 stroke-[2.5px]" />
                 {unreadSubgroupsCount > 0 && (
                   <span
                     className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#f23e2e] ring-2 ring-white dark:ring-neutral-900 animate-pulse"
@@ -343,12 +343,12 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
                 <button
                   type="button"
                   onClick={onOpenMembersModal}
-                  className="px-3 sm:px-4 py-2 rounded-xl sm:rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer shadow-2xs active:scale-95 shrink-0"
+                  className="px-3.5 sm:px-4 py-2.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl sm:rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-sm font-bold transition-all flex items-center gap-2 cursor-pointer shadow-2xs active:scale-95 shrink-0"
                   title={`Visualizza Membri di ${activeSubgroup ? activeSubgroup.name : activeGroup.name}`}
                   aria-label={`Membri: ${currentMembersCount}`}
                 >
-                  <Users className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-[#f23e2e]" />
-                  <span className="font-mono font-bold text-xs sm:text-sm">
+                  <Users className="w-4.5 h-4.5 text-[#f23e2e]" />
+                  <span className="font-mono font-bold text-sm">
                     {currentMembersCount}
                   </span>
                 </button>
@@ -360,11 +360,11 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
               <button
                 type="button"
                 onClick={handleOpenCustomizeModal}
-                className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 hover:text-purple-600 dark:hover:text-purple-400 text-xs font-bold transition-all flex items-center justify-center cursor-pointer shadow-2xs active:scale-95 border border-neutral-200/60 dark:border-neutral-700/60 shrink-0"
+                className="p-2.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-xl sm:rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 hover:text-purple-600 dark:hover:text-purple-400 text-xs font-bold transition-all flex items-center justify-center cursor-pointer shadow-2xs active:scale-95 border border-neutral-200/60 dark:border-neutral-700/60 shrink-0"
                 title={activeSubgroup ? 'Impostazioni sottogruppo' : 'Impostazioni gruppo'}
                 aria-label="Impostazioni"
               >
-                <Settings className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                <Settings className="w-5 h-5 sm:w-4.5 sm:h-4.5" />
               </button>
             )}
           </div>

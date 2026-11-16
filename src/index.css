@@ -71,3 +71,20 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
 input[type="date"]::-webkit-calendar-picker-indicator:hover {
   transform: scale(1.02);
 }
+
+/* Mobile ergonomics (< 768px): rende tutti i tasti standard leggermente più grandi e comodi al tocco */
+@media (max-width: 767px) {
+  button:not([data-slot-key]):not([data-mobile-compact]):not(.calendar-event-chip):not(.absolute):not(.hover\:underline):not(.underline):not(.w-3\.5.h-3\.5):not(.w-4.h-4):not(.w-5.h-5):not(.w-6.h-6) {
+    min-height: 44px;
+  }
+
+  button.w-7.h-7:not(.absolute):not([data-mobile-compact]),
+  button.w-8.h-8:not(.absolute):not([data-mobile-compact]),
+  button.w-9.h-9:not(.absolute):not([data-mobile-compact]) {
+    width: 2.625rem;
+    height: 2.625rem;
+    min-width: 2.625rem;
+    min-height: 2.625rem;
+  }
+}
+

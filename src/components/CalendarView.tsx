@@ -275,11 +275,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </div>
 
           {/* Switch Mese / Settimana */}
-          <div className="flex p-0.5 bg-neutral-200/80 dark:bg-neutral-800 rounded-xl border border-neutral-300/60 dark:border-neutral-700 text-xs font-bold">
+          <div className="flex p-1 bg-neutral-200/80 dark:bg-neutral-800 rounded-xl border border-neutral-300/60 dark:border-neutral-700 text-xs font-bold">
             <button
               type="button"
               onClick={() => setViewMode('month')}
-              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              className={`px-3.5 py-2 md:px-2.5 md:py-1 rounded-lg transition-all cursor-pointer text-sm md:text-xs ${
                 viewMode === 'month'
                   ? 'bg-white dark:bg-neutral-900 text-[#f23e2e] shadow-2xs font-black'
                   : 'text-neutral-600 dark:text-neutral-400'
@@ -290,7 +290,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             <button
               type="button"
               onClick={() => setViewMode('week')}
-              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              className={`px-3.5 py-2 md:px-2.5 md:py-1 rounded-lg transition-all cursor-pointer text-sm md:text-xs ${
                 viewMode === 'week'
                   ? 'bg-white dark:bg-neutral-900 text-[#f23e2e] shadow-2xs font-black'
                   : 'text-neutral-600 dark:text-neutral-400'
@@ -305,34 +305,34 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       {/* Barra di Navigazione Mese / Settimana */}
       <div className="bg-white dark:bg-neutral-900 rounded-2xl p-3 border border-neutral-200/90 dark:border-neutral-800 shadow-2xs flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-black text-neutral-900 dark:text-white capitalize">
+          <h2 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white capitalize">
             {monthNames[currentMonth]} {currentYear}
           </h2>
           <button
             type="button"
             onClick={handleToday}
-            className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 cursor-pointer"
+            className="text-xs md:text-[10px] font-extrabold px-3 py-1.5 md:px-2 md:py-0.5 rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 cursor-pointer"
           >
             Oggi
           </button>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={handlePrev}
-            className="w-8 h-8 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 flex items-center justify-center cursor-pointer transition-colors"
+            className="w-10 h-10 md:w-8 md:h-8 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 flex items-center justify-center cursor-pointer transition-colors"
             aria-label="Precedente"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-5 h-5 md:w-4 md:h-4" />
           </button>
           <button
             type="button"
             onClick={handleNext}
-            className="w-8 h-8 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 flex items-center justify-center cursor-pointer transition-colors"
+            className="w-10 h-10 md:w-8 md:h-8 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 flex items-center justify-center cursor-pointer transition-colors"
             aria-label="Successivo"
           >
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-5 h-5 md:w-4 md:h-4" />
           </button>
         </div>
       </div>
@@ -407,7 +407,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             setSelectedCalendarEvent(ev);
                           }
                         }}
-                        className={`w-full text-left px-1.5 py-0.5 rounded text-[9px] font-black truncate block cursor-pointer transition-transform hover:scale-102 ${
+                        className={`calendar-event-chip w-full text-left px-1.5 py-0.5 rounded text-[9px] font-black truncate block cursor-pointer transition-transform hover:scale-102 ${
                           ev.eventType === 'official'
                             ? 'bg-[#f23e2e] text-white'
                             : 'bg-neutral-800 text-white dark:bg-neutral-700'

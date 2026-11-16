@@ -117,9 +117,9 @@ export const PollsHubView: React.FC<PollsHubViewProps> = ({
           <button
             type="button"
             onClick={onOpenCreatePoll}
-            className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-[#f23e2e] hover:bg-red-600 text-white text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-red-600/30 hover:shadow-red-600/40 active:scale-95 shrink-0"
+            className="w-full sm:w-auto px-5 py-3.5 md:py-3 rounded-2xl bg-[#f23e2e] hover:bg-red-600 text-white text-sm md:text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-red-600/30 hover:shadow-red-600/40 active:scale-95 shrink-0"
           >
-            <Plus className="w-4 h-4 stroke-[3px]" />
+            <Plus className="w-5 h-5 md:w-4 md:h-4 stroke-[3px]" />
             <span>Crea Nuovo Sondaggio</span>
           </button>
         </div>
@@ -130,7 +130,7 @@ export const PollsHubView: React.FC<PollsHubViewProps> = ({
           <button
             type="button"
             onClick={() => setActiveSubTab('created')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            className={`flex-1 py-3 md:py-2.5 px-3 rounded-xl text-sm md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               activeSubTab === 'created'
                 ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-black'
                 : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -152,7 +152,7 @@ export const PollsHubView: React.FC<PollsHubViewProps> = ({
           <button
             type="button"
             onClick={() => setActiveSubTab('invited')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer relative ${
+            className={`flex-1 py-3 md:py-2.5 px-3 rounded-xl text-sm md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer relative ${
               activeSubTab === 'invited'
                 ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-black'
                 : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'

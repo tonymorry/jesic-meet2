@@ -161,7 +161,7 @@ export const EventsFeedView: React.FC<EventsFeedViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveSubTab('pending')}
-          className={`flex-1 py-2 rounded-xl text-xs font-black transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`flex-1 py-3 md:py-2 rounded-xl text-sm md:text-xs font-black transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
             activeSubTab === 'pending'
               ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs'
               : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -178,7 +178,7 @@ export const EventsFeedView: React.FC<EventsFeedViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveSubTab('responded')}
-          className={`flex-1 py-2 rounded-xl text-xs font-black transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`flex-1 py-3 md:py-2 rounded-xl text-sm md:text-xs font-black transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
             activeSubTab === 'responded'
               ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs'
               : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -322,9 +322,9 @@ export const EventsFeedView: React.FC<EventsFeedViewProps> = ({
                       type="button"
                       onClick={() => handleDeclineClick(evt)}
                       disabled={actionLoadingId === evt.id}
-                      className="flex-1 py-2.5 px-3 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                      className="flex-1 py-3 md:py-2.5 px-3.5 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-xl font-bold text-sm md:text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
                     >
-                      <X className="w-4 h-4 text-neutral-400" />
+                      <X className="w-4.5 h-4.5 md:w-4 md:h-4 text-neutral-400" />
                       <span>Non Partecipo</span>
                     </button>
 
@@ -333,12 +333,12 @@ export const EventsFeedView: React.FC<EventsFeedViewProps> = ({
                       type="button"
                       onClick={() => handleParticipateClick(evt)}
                       disabled={actionLoadingId === evt.id}
-                      className="flex-1 py-2.5 px-3 bg-[#f23e2e] hover:bg-red-600 text-white rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-red-500/25 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                      className="flex-1 py-3 md:py-2.5 px-3.5 bg-[#f23e2e] hover:bg-red-600 text-white rounded-xl font-black text-sm md:text-xs flex items-center justify-center gap-1.5 shadow-md shadow-red-500/25 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
                     >
                       {actionLoadingId === evt.id ? (
                         <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
                       ) : (
-                        <Check className="w-4 h-4 stroke-[3px]" />
+                        <Check className="w-4.5 h-4.5 md:w-4 md:h-4 stroke-[3px]" />
                       )}
                       <span>Partecipa</span>
                     </button>
