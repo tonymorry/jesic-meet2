@@ -16,7 +16,7 @@ import { Group, User, Subgroup } from '../types';
 import { GroupAvatar } from './GroupAvatar';
 import { PRESET_COLORS } from './SubgroupsDrawer';
 import {
-  ArrowLeft,
+  Menu,
   Users,
   Check,
   Trash2,
@@ -38,6 +38,7 @@ export interface GroupWorkspaceHeaderProps {
   onSelectSubgroup?: (subgroupId: string | null) => void;
   onOpenMembersModal: () => void;
   onToggleSubgroupsMenu?: () => void;
+  unreadSubgroupsCount?: number;
   onUpdateGroupName?: (groupId: string, newName: string) => Promise<boolean | void>;
   onUpdateGroup?: (
     groupId: string,
@@ -63,6 +64,7 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
   onSelectSubgroup,
   onOpenMembersModal,
   onToggleSubgroupsMenu,
+  unreadSubgroupsCount = 0,
   onUpdateGroupName,
   onUpdateGroup,
   onDeleteGroup,
@@ -241,22 +243,26 @@ export const GroupWorkspaceHeader: React.FC<GroupWorkspaceHeaderProps> = ({
         } : undefined}
       >
         <div className="flex items-center justify-between gap-2.5 sm:gap-4">
-          {/* Tasto Torna Indietro + Avatar + Nome Gruppo */}
+          {/* Tasto Menu Hamburger + Avatar + Nome Gruppo */}
           <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1">
-            {/* Tasto Freccetta: se dentro un sottogruppo torna al livello superiore, altrimenti a I Tuoi Gruppi */}
-            <button
-              type="button"
-              onClick={activeSubgroup ? (onBackToMainGroup || onBackToGroups) : onBackToGroups}
-              className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-[#f23e2e] transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
-              title={
-                activeSubgroup
-                  ? (activeSubgroup.parentId ? 'Torna al sottogruppo superiore' : `Torna al gruppo principale "${activeGroup.name}"`)
-                  : 'Torna alla lista dei tuoi gruppi'
-              }
-              aria-label="Torna indietro"
-            >
-              <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5px]" />
-            </button>
+            {/* Bottone Hamburger al posto della freccetta accanto all'icona/immagine del gruppo */}
+            {onToggleSubgroupsMenu && (
+              <button
+                type="button"
+                onClick={onToggleSubgroupsMenu}
+                className="relative p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-[#f23e2e] transition-all flex items-center justify-center cursor-pointer active:scale-95 shrink-0 border border-neutral-200/60 dark:border-neutral-700/60 shadow-2xs"
+                title={activeSubgroup ? `Cartella attiva: ${activeSubgroup.name} • Apri Sottogruppi` : 'Menu Sottogruppi e Cartelle'}
+                aria-label="Menu Sottogruppi e Cartelle"
+              >
+                <Menu className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5px]" />
+                {unreadSubgroupsCount > 0 && (
+                  <span
+                    className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#f23e2e] ring-2 ring-white dark:ring-neutral-900 animate-pulse"
+                    title={`${unreadSubgroupsCount} messaggi non letti nelle cartelle del gruppo`}
+                  />
+                )}
+              </button>
+            )}
 
             <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
               {/* Quadratone Avatar Icona o Immagine ingrandito: del Sottogruppo se attivo, altrimenti del Gruppo Principale */}

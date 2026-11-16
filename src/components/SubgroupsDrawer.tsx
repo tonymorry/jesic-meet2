@@ -58,6 +58,7 @@ export interface SubgroupsDrawerProps {
     subgroupIdOrCode: string,
     code?: string
   ) => Promise<{ success: boolean; error?: string; subgroup?: any }>;
+  unreadChatByScope?: Record<string, number>;
 }
 
 export const PRESET_ICONS = ['📁', '🚀', '💡', '💻', '📊', '🎯', '⚡', '🏢', '🔥', '🎓', '🎨', '💼', '⭐', '🛠️', '👥'];
@@ -88,6 +89,7 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
   onUpdateSubgroup,
   onDeleteSubgroup,
   onJoinSubgroup,
+  unreadChatByScope = {},
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [newSubgroupName, setNewSubgroupName] = useState('');
@@ -522,11 +524,18 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
                   </div>
                 </div>
 
-                {activeSubgroupId === null && (
-                  <span className="w-5 h-5 rounded-full bg-[#f23e2e] text-white flex items-center justify-center shrink-0">
-                    <Check className="w-3.5 h-3.5 stroke-[3px]" />
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {(unreadChatByScope['root'] || 0) > 0 && (
+                    <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#f23e2e] text-white text-[10px] font-black flex items-center justify-center shadow-xs animate-pulse">
+                      {(unreadChatByScope['root'] || 0) > 99 ? '99+' : unreadChatByScope['root']}
+                    </span>
+                  )}
+                  {activeSubgroupId === null && (
+                    <span className="w-5 h-5 rounded-full bg-[#f23e2e] text-white flex items-center justify-center shrink-0">
+                      <Check className="w-3.5 h-3.5 stroke-[3px]" />
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1443,8 +1452,16 @@ export const SubgroupsDrawer: React.FC<SubgroupsDrawerProps> = ({
 
                               {/* Azioni del rettangolo: pulite e compatte */}
                               <div className="flex flex-col items-end justify-between self-stretch shrink-0 py-0.5 gap-1">
-                                {/* Riga superiore: stato attivo, copia codice, entra, matita e cestino */}
+                                {/* Riga superiore: messaggi non letti, stato attivo, copia codice, entra, matita */}
                                 <div className="flex items-center gap-1">
+                                  {(unreadChatByScope[subgroup.id] || 0) > 0 && (
+                                    <span
+                                      className="min-w-[18px] h-4.5 px-1.5 rounded-full bg-white text-[#f23e2e] text-[9.5px] font-black flex items-center justify-center shrink-0 shadow-xs animate-pulse"
+                                      title={`${unreadChatByScope[subgroup.id]} messaggi non letti`}
+                                    >
+                                      {(unreadChatByScope[subgroup.id] || 0) > 99 ? '99+' : unreadChatByScope[subgroup.id]}
+                                    </span>
+                                  )}
                                   {isSelected && (
                                     <span
                                       className="w-4 h-4 rounded-full bg-white flex items-center justify-center shrink-0 shadow-xs"

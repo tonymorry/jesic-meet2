@@ -36,7 +36,9 @@ interface BottomNavProps {
   onOpenCreateMenu?: () => void;
   onToggleSubgroupsMenu?: () => void;
   pendingInvitesCount?: number;
+  pendingGroupPollsCount?: number;
   pendingOfficialEventsCount?: number;
+  unreadChatCount?: number;
   isClientAdmin?: boolean; // True SOLO per 'admin' e 'admin_clienti'
   pendingClientRequestsCount?: number;
   isInsideGroup?: boolean; // Se l'utente è dentro un gruppo specifico
@@ -49,7 +51,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onOpenCreateMenu,
   onToggleSubgroupsMenu,
   pendingInvitesCount = 0,
+  pendingGroupPollsCount = 0,
   pendingOfficialEventsCount = 0,
+  unreadChatCount = 0,
   isClientAdmin = false,
   pendingClientRequestsCount = 0,
   isInsideGroup = false,
@@ -202,11 +206,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               }`}
               aria-label="Sondaggi del gruppo"
             >
-              <Inbox
-                className={`w-6 h-6 transition-transform ${
-                  currentTab === 'dashboard' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
-                }`}
-              />
+              <div className="relative">
+                <Inbox
+                  className={`w-6 h-6 transition-transform ${
+                    currentTab === 'dashboard' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
+                  }`}
+                />
+                {pendingGroupPollsCount > 0 && (
+                  <span className="absolute -top-1 -right-2.5 min-w-[17px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[9.5px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs">
+                    {pendingGroupPollsCount}
+                  </span>
+                )}
+              </div>
               <span
                 className={`text-[10.5px] mt-1 tracking-tight leading-none ${
                   currentTab === 'dashboard'
@@ -333,18 +344,25 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('chat')}
-              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 cursor-pointer ${
+              className={`flex-1 flex flex-col items-center justify-center py-1.5 transition-all active:scale-95 relative cursor-pointer ${
                 currentTab === 'chat'
                   ? 'text-[#f23e2e] dark:text-[#f23e2e]'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
               }`}
               aria-label="Chat del gruppo o sottogruppo"
             >
-              <MessageSquare
-                className={`w-6 h-6 transition-transform ${
-                  currentTab === 'chat' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
-                }`}
-              />
+              <div className="relative">
+                <MessageSquare
+                  className={`w-6 h-6 transition-transform ${
+                    currentTab === 'chat' ? 'stroke-[2.5px] scale-110' : 'stroke-[1.9px]'
+                  }`}
+                />
+                {unreadChatCount > 0 && (
+                  <span className="absolute -top-1 -right-2.5 min-w-[17px] h-4.5 px-1 rounded-full bg-[#f23e2e] text-white text-[9.5px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-xs animate-pulse">
+                    {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                  </span>
+                )}
+              </div>
               <span
                 className={`text-[10.5px] mt-1 tracking-tight leading-none ${
                   currentTab === 'chat'

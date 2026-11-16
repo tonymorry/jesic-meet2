@@ -40,6 +40,7 @@ interface GroupsHubViewProps {
   currentUser: User;
   groups: Group[];
   allUsers: User[];
+  groupNotifications?: Record<string, { unansweredEvents: number; unreadMessages: number }>;
   onSelectGroup: (group: Group) => void;
   onCreateGroup: (name: string, description: string, avatar?: string, isPublic?: boolean) => Promise<any> | void;
   onJoinGroup: (codeOrLink: string) => Promise<{ success: boolean; message: string; group?: Group }>;
@@ -52,6 +53,7 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
   currentUser,
   groups,
   allUsers,
+  groupNotifications = {},
   onSelectGroup,
   onCreateGroup,
   onJoinGroup,
@@ -347,6 +349,10 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
                 const memberUsers = allUsers.filter((u) =>
                   group.members.some((m) => m.userId === u.id)
                 );
+                const notif = isMember ? groupNotifications[group.id] : undefined;
+                const unansweredEvents = notif?.unansweredEvents || 0;
+                const unreadMessages = notif?.unreadMessages || 0;
+                const totalNotif = unansweredEvents + unreadMessages;
 
                 return (
                   <div
@@ -368,11 +374,36 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
                       {/* Top Header Card con Avatar, Nome e Badge Visibilità */}
                       <div className="flex items-start justify-between gap-2.5">
                         <div className="flex items-center gap-3 min-w-0">
-                          <GroupAvatar avatar={group.avatar} name={group.name} size="lg" />
+                          <div className="relative shrink-0">
+                            <GroupAvatar avatar={group.avatar} name={group.name} size="lg" />
+                            {totalNotif > 0 && (
+                              <span
+                                className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-[#f23e2e] text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-sm animate-pulse"
+                                title="Nuove notifiche nel gruppo"
+                              >
+                                {totalNotif > 99 ? '99+' : totalNotif}
+                              </span>
+                            )}
+                          </div>
                           <div className="min-w-0">
                             <h3 className="text-sm font-black text-neutral-900 dark:text-white truncate">
                               {group.name}
                             </h3>
+                            {(unansweredEvents > 0 || unreadMessages > 0) && (
+                              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                {unansweredEvents > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-[9.5px] font-black px-2 py-0.5 rounded-full bg-[#f23e2e] text-white shadow-2xs">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                                    {unansweredEvents} {unansweredEvents === 1 ? 'evento da rispondere' : 'eventi da rispondere'}
+                                  </span>
+                                )}
+                                {unreadMessages > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-[9.5px] font-black px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-950/70 text-[#f23e2e]">
+                                    💬 {unreadMessages} {unreadMessages === 1 ? 'nuovo msg' : 'nuovi msg'}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -557,6 +588,10 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
                 const memberUsers = allUsers.filter((u) =>
                   group.members.some((m) => m.userId === u.id)
                 );
+                const notif = groupNotifications[group.id];
+                const unansweredEvents = notif?.unansweredEvents || 0;
+                const unreadMessages = notif?.unreadMessages || 0;
+                const totalNotif = unansweredEvents + unreadMessages;
 
                 return (
                   <div
@@ -568,13 +603,36 @@ export const GroupsHubView: React.FC<GroupsHubViewProps> = ({
                       {/* Riga Superiore: Avatar + Titolo + Badge Visibilità & Ruolo */}
                       <div className="flex items-start justify-between gap-2.5">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="group-hover:scale-105 transition-transform shrink-0">
+                          <div className="relative group-hover:scale-105 transition-transform shrink-0">
                             <GroupAvatar avatar={group.avatar} name={group.name} size="lg" />
+                            {totalNotif > 0 && (
+                              <span
+                                className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-[#f23e2e] text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-900 shadow-sm animate-pulse"
+                                title="Nuovi eventi da rispondere o messaggi non letti"
+                              >
+                                {totalNotif > 99 ? '99+' : totalNotif}
+                              </span>
+                            )}
                           </div>
                           <div className="min-w-0">
                             <h3 className="text-sm font-black text-neutral-900 dark:text-white group-hover:text-[#f23e2e] transition-colors leading-tight truncate">
                               {group.name}
                             </h3>
+                            {(unansweredEvents > 0 || unreadMessages > 0) && (
+                              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                {unansweredEvents > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-[9.5px] font-black px-2 py-0.5 rounded-full bg-[#f23e2e] text-white shadow-2xs">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                                    {unansweredEvents} {unansweredEvents === 1 ? 'evento da rispondere' : 'eventi da rispondere'}
+                                  </span>
+                                )}
+                                {unreadMessages > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-[9.5px] font-black px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-950/70 text-[#f23e2e]">
+                                    💬 {unreadMessages} {unreadMessages === 1 ? 'nuovo msg' : 'nuovi msg'}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
 

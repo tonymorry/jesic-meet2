@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   User,
   MeetingEvent,
@@ -38,7 +38,7 @@ import { OfficialEventDetailModal } from './components/OfficialEventDetailModal'
 import { PublicBookingForm } from './components/PublicBookingForm';
 import { ClientRequestsDashboard } from './components/ClientRequestsDashboard';
 import { SplashScreen } from './components/SplashScreen';
-import { isInstalledPwa } from './utils/pwaHelper';
+import { isInstalledPwa, updatePwaAppBadge } from './utils/pwaHelper';
 import { PrivacyPolicyView } from './components/PrivacyPolicyView';
 import { TermsOfServiceView } from './components/TermsOfServiceView';
 import { PushBanner } from './components/PushBanner';
@@ -201,6 +201,18 @@ export default function App() {
 
   // Modale Membri del Gruppo
   const [isGroupMembersModalOpen, setIsGroupMembersModalOpen] = useState(false);
+
+  // Conteggio messaggi chat non letti per gruppo e sottogruppo (chiave: `${groupId}::${subgroupId || 'root'}`)
+  const [unreadChatCounts, setUnreadChatCounts] = useState<Record<string, number>>({});
+  const currentUserIdRef = useRef<string | null>(currentUser?.id || null);
+  currentUserIdRef.current = currentUser?.id || null;
+  const groupsRef = useRef<Group[]>(groups);
+  groupsRef.current = groups;
+  const chatLocationRef = useRef<{ groupId: string | null; subgroupId: string | null; tab: NavTab }>({
+    groupId: activeGroupId,
+    subgroupId: activeSubgroupId,
+    tab: 'groups',
+  });
 
   // Salvataggio localStorage
   useEffect(() => {
@@ -401,6 +413,101 @@ export default function App() {
     }
   });
 
+  // Funzione per caricare il riepilogo dei messaggi non letti dal server
+  const fetchUnreadChatSummary = useCallback((explicitUserId?: string) => {
+    const uid = explicitUserId || currentUserIdRef.current;
+    if (!uid) {
+      setUnreadChatCounts({});
+      return;
+    }
+    fetch(`/api/chat/unread-summary?userId=${encodeURIComponent(uid)}`, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.counts)) {
+          const map: Record<string, number> = {};
+          for (const item of data.counts) {
+            if (!item || !item.groupId) continue;
+            const key = `${item.groupId}::${item.subgroupId || 'root'}`;
+            map[key] = (map[key] || 0) + (Number(item.count) || 0);
+          }
+          setUnreadChatCounts(map);
+        }
+      })
+      .catch((e) => console.log('[Sync /api/chat/unread-summary]', e));
+  }, []);
+
+  // Ascolto WebSocket in tempo reale per pallini/notifiche Chat non lette
+  useRealtimeSubscription('chat:message_created', (payload) => {
+    const uid = currentUserIdRef.current;
+    if (!uid || !payload?.groupId || !payload?.message) return;
+    if (payload.message.authorId === uid) return;
+
+    const targetGroup = groupsRef.current.find((g) => g.id === payload.groupId);
+    if (!targetGroup) return;
+    const isGroupMember =
+      targetGroup.creatorId === uid || targetGroup.members?.some((m) => m.userId === uid);
+    if (!isGroupMember) return;
+
+    const subId =
+      payload.subgroupId && payload.subgroupId !== 'null' && payload.subgroupId !== 'undefined'
+        ? String(payload.subgroupId).trim()
+        : null;
+
+    if (subId) {
+      const sub = targetGroup.subgroups?.find((s) => s.id === subId);
+      if (!sub) return;
+      const hasSubAccess =
+        targetGroup.creatorId === uid ||
+        Boolean(sub.isPublic) ||
+        sub.createdBy === uid ||
+        (Array.isArray(sub.members) && sub.members.includes(uid));
+      if (!hasSubAccess) return;
+    }
+
+    const isActivelyViewing =
+      typeof document !== 'undefined' &&
+      document.visibilityState === 'visible' &&
+      chatLocationRef.current.tab === 'chat' &&
+      chatLocationRef.current.groupId === payload.groupId &&
+      (chatLocationRef.current.subgroupId || null) === subId;
+
+    if (isActivelyViewing) return;
+
+    const key = `${payload.groupId}::${subId || 'root'}`;
+    setUnreadChatCounts((prev) => ({
+      ...prev,
+      [key]: (prev[key] || 0) + 1,
+    }));
+  });
+
+  useRealtimeSubscription('chat:messages_read', (payload) => {
+    const uid = currentUserIdRef.current;
+    if (!uid || !payload?.groupId || payload?.userId !== uid) return;
+    const subId =
+      payload.subgroupId && payload.subgroupId !== 'null' && payload.subgroupId !== 'undefined'
+        ? String(payload.subgroupId).trim()
+        : null;
+    const key = `${payload.groupId}::${subId || 'root'}`;
+    setUnreadChatCounts((prev) => {
+      if (!(key in prev) || prev[key] === 0) return prev;
+      const nextCount =
+        Array.isArray(payload.messageIds) && payload.messageIds.length > 0
+          ? Math.max(0, (prev[key] || 0) - payload.messageIds.length)
+          : 0;
+      return {
+        ...prev,
+        [key]: nextCount,
+      };
+    });
+    if (Array.isArray(payload.messageIds) && payload.messageIds.length > 0) {
+      fetchUnreadChatSummary(uid);
+    }
+  });
+
+  useRealtimeSubscription('chat:message_deleted', () => {
+    fetchUnreadChatSummary();
+  });
+
   // Funzione riutilizzabile di sincronizzazione completa da MongoDB Atlas tramite Express API
   const syncAllAppData = useCallback(() => {
     // 1. Carica e sincronizza Utenti e Ruolo dal Database
@@ -500,7 +607,19 @@ export default function App() {
         }
       })
       .catch((e) => console.log('[Sync /api/client-requests]', e));
-  }, []);
+
+    // 6. Carica conteggio messaggi chat non letti
+    fetchUnreadChatSummary();
+  }, [fetchUnreadChatSummary]);
+
+  // Aggiorna riepilogo chat non lette al cambio utente
+  useEffect(() => {
+    if (currentUser?.id) {
+      fetchUnreadChatSummary(currentUser.id);
+    } else {
+      setUnreadChatCounts({});
+    }
+  }, [currentUser?.id, fetchUnreadChatSummary]);
 
   // Caricamento iniziale completo
   useEffect(() => {
@@ -562,6 +681,11 @@ export default function App() {
       ? 'dashboard'
       : 'groups'
   );
+  chatLocationRef.current = {
+    groupId: activeGroupId,
+    subgroupId: activeSubgroupId,
+    tab: currentTab,
+  };
 
   // Modali Creazione
   const [isChoiceModalOpen, setIsChoiceModalOpen] = useState(false);
@@ -1083,6 +1207,8 @@ export default function App() {
     setCurrentUser(null);
     setActiveGroupId(null);
     setActiveSubgroupId(null);
+    setUnreadChatCounts({});
+    updatePwaAppBadge(0);
     setCurrentTab('groups');
   };
 
@@ -2273,35 +2399,131 @@ export default function App() {
     }
   };
 
-  // Badge conteggio notifiche
-  const pendingInvitesCount = events.filter((e) => {
-    if (e.eventType === 'official') return false;
-    if (isEventPassed(e)) return false;
-    if (!currentUser) return false;
-    if (e.creatorId === currentUser.id) return false;
-    const isInvited =
-      e.invitees.some((i) => i.userId === currentUser.id) ||
-      e.externalInviteEmails?.some((email) => email.toLowerCase() === currentUser.email.toLowerCase());
-    if (!isInvited) return false;
-    const resp = responses.find((r) => r.eventId === e.id && r.userId === currentUser.id);
-    return !resp || resp.status === 'pending';
-  }).length;
+  // Helpers di verifica inviti non ancora risposti
+  const isUserInvitedToEvent = (e: MeetingEvent, u: User) =>
+    Boolean(
+      e.invitees?.some((i) => i.userId === u.id) ||
+        e.externalInviteEmails?.some((email) => email.toLowerCase() === u.email.toLowerCase())
+    );
 
-  const pendingOfficialEventsCount = events.filter((e) => {
+  const isPollPendingForUser = (e: MeetingEvent, u: User) => {
+    if (e.eventType === 'official') return false;
+    if (e.status === 'confirmed') return false;
+    if (isEventPassed(e)) return false;
+    if (e.creatorId === u.id) return false;
+    if (!isUserInvitedToEvent(e, u)) return false;
+    const resp = responses.find((r) => r.eventId === e.id && r.userId === u.id);
+    return !resp || resp.status === 'pending';
+  };
+
+  const isOfficialPendingForUser = (e: MeetingEvent, u: User) => {
     if (e.eventType !== 'official') return false;
     if (isEventPassed(e)) return false;
-    if (!currentUser) return false;
-    const isInvited =
-      e.invitees.some((i) => i.userId === currentUser.id) ||
-      e.externalInviteEmails?.some((email) => email.toLowerCase() === currentUser.email.toLowerCase());
-    if (!isInvited) return false;
-    const myPart = e.participants?.find((p) => p.userId === currentUser.id);
+    if (!isUserInvitedToEvent(e, u)) return false;
+    const myPart = e.participants?.find((p) => p.userId === u.id);
     return !myPart || myPart.status === 'pending';
-  }).length;
+  };
+
+  // Badge fuori dai gruppi (Tab "Sondaggi" Home = solo sondaggi fuori gruppo)
+  const pendingInvitesCount = currentUser
+    ? events.filter((e) => !e.groupId && isPollPendingForUser(e, currentUser)).length
+    : 0;
+
+  // Badge dentro il gruppo attivo: Sondaggi del contesto attivo & Eventi ufficiali del gruppo
+  const pendingGroupPollsCount =
+    currentUser && isInsideGroup && activeGroup
+      ? events.filter(
+          (e) =>
+            e.groupId === activeGroup.id &&
+            (activeSubgroupId
+              ? e.subgroupId === activeSubgroupId
+              : !e.subgroupId || e.subgroupId === null) &&
+            isPollPendingForUser(e, currentUser)
+        ).length
+      : 0;
+
+  const pendingOtherSubgroupPollsCount =
+    currentUser && isInsideGroup && activeGroup
+      ? events.filter((e) => {
+          if (e.groupId !== activeGroup.id) return false;
+          const isSameScope = activeSubgroupId
+            ? e.subgroupId === activeSubgroupId
+            : !e.subgroupId || e.subgroupId === null;
+          return !isSameScope && isPollPendingForUser(e, currentUser);
+        }).length
+      : 0;
+
+  const pendingOfficialEventsCount =
+    currentUser && isInsideGroup && activeGroup
+      ? events.filter((e) => e.groupId === activeGroup.id && isOfficialPendingForUser(e, currentUser))
+          .length
+      : 0;
 
   const pendingClientRequestsCount = isInsideGroup && activeGroup
     ? clientRequests.filter((r) => r.groupId === activeGroup.id && r.status === 'pending').length
     : 0;
+
+  // Mappa notifiche per ciascun gruppo (usata nella Home "Gruppi")
+  const groupNotifications: Record<string, { unansweredEvents: number; unreadMessages: number }> = {};
+  if (currentUser) {
+    for (const g of groups) {
+      const unansweredEvents = events.filter(
+        (e) =>
+          e.groupId === g.id &&
+          (isPollPendingForUser(e, currentUser) || isOfficialPendingForUser(e, currentUser))
+      ).length;
+
+      let unreadMessages = unreadChatCounts[`${g.id}::root`] || 0;
+      if (Array.isArray(g.subgroups)) {
+        for (const sub of g.subgroups) {
+          if (sub?.id) {
+            unreadMessages += unreadChatCounts[`${g.id}::${sub.id}`] || 0;
+          }
+        }
+      }
+
+      if (unansweredEvents > 0 || unreadMessages > 0) {
+        groupNotifications[g.id] = { unansweredEvents, unreadMessages };
+      }
+    }
+  }
+
+  // Mappa messaggi non letti per cartella/sottogruppo del gruppo attivo (usata in Chat, TopHeader, BottomNav, SubgroupsDrawer)
+  const activeGroupUnreadChatByScope: Record<string, number> = {};
+  let unreadChatCountForActiveGroup = 0;
+  let unreadChatOtherFoldersCount = 0;
+  if (activeGroup) {
+    const activeScopeKey = activeSubgroupId || 'root';
+    const rootCount = unreadChatCounts[`${activeGroup.id}::root`] || 0;
+    if (rootCount > 0) {
+      activeGroupUnreadChatByScope['root'] = rootCount;
+      unreadChatCountForActiveGroup += rootCount;
+      if (activeScopeKey !== 'root') unreadChatOtherFoldersCount += rootCount;
+    }
+    if (Array.isArray(activeGroup.subgroups)) {
+      for (const sub of activeGroup.subgroups) {
+        if (!sub?.id) continue;
+        const c = unreadChatCounts[`${activeGroup.id}::${sub.id}`] || 0;
+        if (c > 0) {
+          activeGroupUnreadChatByScope[sub.id] = c;
+          unreadChatCountForActiveGroup += c;
+          if (activeScopeKey !== sub.id) unreadChatOtherFoldersCount += c;
+        }
+      }
+    }
+  }
+
+  // Totale globale notifiche per il pallino sull'icona dell'app scaricata (PWA Badging API)
+  const totalUnreadChatsGlobal = Object.values(unreadChatCounts).reduce((sum, n) => sum + (n || 0), 0);
+  const totalUnansweredEventsGlobal = currentUser
+    ? events.filter((e) => isPollPendingForUser(e, currentUser) || isOfficialPendingForUser(e, currentUser))
+        .length
+    : 0;
+  const totalAppBadgeCount = currentUser ? totalUnansweredEventsGlobal + totalUnreadChatsGlobal : 0;
+
+  useEffect(() => {
+    updatePwaAppBadge(totalAppBadgeCount);
+  }, [totalAppBadgeCount]);
 
   // Evento selezionato nel modale
   const selectedEvent = events.find((e) => e.id === selectedEventId);
@@ -2358,7 +2580,9 @@ export default function App() {
             onSelectTab={setCurrentTab}
             onOpenCreateMenu={handlePlusButtonClick}
             pendingInvitesCount={pendingInvitesCount}
+            pendingGroupPollsCount={pendingGroupPollsCount}
             pendingOfficialEventsCount={pendingOfficialEventsCount}
+            unreadChatCount={unreadChatCountForActiveGroup}
             isClientAdmin={isClientAdmin}
             pendingClientRequestsCount={pendingClientRequestsCount}
             isInsideGroup={isInsideGroup}
@@ -2404,6 +2628,7 @@ export default function App() {
                     currentUser={currentUser}
                     groups={groups}
                     allUsers={users}
+                    groupNotifications={groupNotifications}
                     onSelectGroup={handleSelectGroup}
                     onCreateGroup={handleCreateGroup}
                     onJoinGroup={handleJoinGroup}
@@ -2494,6 +2719,7 @@ export default function App() {
                     onUpdateSubgroup={handleUpdateSubgroup}
                     onDeleteSubgroup={handleDeleteSubgroup}
                     onToggleSubgroupsMenu={() => setIsSubgroupsDrawerOpen(true)}
+                    unreadSubgroupsCount={unreadChatOtherFoldersCount + pendingOtherSubgroupPollsCount}
                   />
                 </div>
 
@@ -2604,7 +2830,9 @@ export default function App() {
               currentUser={currentUser}
               onOpenCreateMenu={handlePlusButtonClick}
               pendingInvitesCount={pendingInvitesCount}
+              pendingGroupPollsCount={pendingGroupPollsCount}
               pendingOfficialEventsCount={pendingOfficialEventsCount}
+              unreadChatCount={unreadChatCountForActiveGroup}
               isClientAdmin={isClientAdmin}
               pendingClientRequestsCount={pendingClientRequestsCount}
               isInsideGroup={isInsideGroup}
@@ -2728,6 +2956,7 @@ export default function App() {
               onUpdateSubgroup={handleUpdateSubgroup}
               onDeleteSubgroup={handleDeleteSubgroup}
               onJoinSubgroup={handleJoinSubgroup}
+              unreadChatByScope={activeGroupUnreadChatByScope}
             />
           )}
 

@@ -47,7 +47,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   pendingClientRequestsCount = 0,
   isGroupClientAdmin = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'created_by_me' | 'my_invites'>('created_by_me');
+  const [activeTab, setActiveTab] = useState<'my_invites' | 'created_by_me'>('my_invites');
   const [showPastArchive, setShowPastArchive] = useState(false);
 
   // 1. SONDAGGI CREATI DA ME (Esclusivamente sondaggi di disponibilità When2meet)
@@ -119,29 +119,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* Tabs Fluidi: "Creati da me" vs "I miei inviti" */}
+      {/* Tabs Fluidi: "I miei inviti" vs "Creati da me" */}
       <div className="flex p-1 bg-neutral-200/50 dark:bg-neutral-800/80 rounded-2xl border border-neutral-200/60 dark:border-neutral-700/60">
-        <button
-          type="button"
-          onClick={() => setActiveTab('created_by_me')}
-          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
-            activeTab === 'created_by_me'
-              ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-black'
-              : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-          }`}
-        >
-          <span>Creati da me</span>
-          <span
-            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-              activeTab === 'created_by_me'
-                ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 font-black'
-                : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 font-bold'
-            }`}
-          >
-            {activeCreatedEvents.length}
-          </span>
-        </button>
-
         <button
           type="button"
           onClick={() => setActiveTab('my_invites')}
@@ -162,6 +141,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
             }`}
           >
             {activeInvites.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('created_by_me')}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all relative flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeTab === 'created_by_me'
+              ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-black'
+              : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+          }`}
+        >
+          <span>Creati da me</span>
+          <span
+            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+              activeTab === 'created_by_me'
+                ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 font-black'
+                : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 font-bold'
+            }`}
+          >
+            {activeCreatedEvents.length}
           </span>
         </button>
       </div>

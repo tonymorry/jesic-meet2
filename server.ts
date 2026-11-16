@@ -2650,6 +2650,102 @@ app.delete('/api/groups/:id/chat/:messageId', async (req: Request, res: Response
   }
 });
 
+// GET /api/chat/unread-summary - Conteggio messaggi non letti per gruppo e sottogruppo
+app.get('/api/chat/unread-summary', async (req: Request, res: Response) => {
+  const userId = String(req.query.userId || '').trim();
+  if (!userId) {
+    return res.status(400).json({ error: 'userId obbligatorio' });
+  }
+
+  try {
+    const fiftyDaysAgo = new Date(Date.now() - 50 * 24 * 60 * 60 * 1000);
+    const userGroups = await GroupModel.find({
+      $or: [{ creatorId: userId }, { 'members.userId': userId }],
+    })
+      .select('_id creatorId subgroups')
+      .lean();
+
+    if (!userGroups || userGroups.length === 0) {
+      return res.json({ success: true, counts: [] });
+    }
+
+    const joinedGroupIds: string[] = [];
+    const accessibleScopes = new Set<string>();
+
+    for (const g of userGroups as any[]) {
+      const gid = String(g._id);
+      joinedGroupIds.push(gid);
+      accessibleScopes.add(`${gid}::root`);
+
+      const isCreator = g.creatorId === userId;
+      if (Array.isArray(g.subgroups)) {
+        for (const sub of g.subgroups) {
+          const sid = sub?.id ? String(sub.id) : sub?._id ? String(sub._id) : '';
+          if (!sid) continue;
+          const hasAccess =
+            isCreator ||
+            Boolean(sub.isPublic) ||
+            sub.createdBy === userId ||
+            (Array.isArray(sub.members) && sub.members.includes(userId));
+          if (hasAccess) {
+            accessibleScopes.add(`${gid}::${sid}`);
+          }
+        }
+      }
+    }
+
+    const aggregated = await ChatMessageModel.aggregate([
+      {
+        $match: {
+          groupId: { $in: joinedGroupIds },
+          createdAt: { $gt: fiftyDaysAgo },
+          authorId: { $ne: userId },
+          'readBy.userId': { $ne: userId },
+        },
+      },
+      {
+        $project: {
+          groupId: 1,
+          normalizedSubgroupId: {
+            $cond: [
+              {
+                $or: [
+                  { $eq: ['$subgroupId', null] },
+                  { $eq: ['$subgroupId', ''] },
+                  { $eq: ['$subgroupId', 'null'] },
+                  { $eq: ['$subgroupId', 'undefined'] },
+                  { $not: ['$subgroupId'] },
+                ],
+              },
+              null,
+              '$subgroupId',
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: { groupId: '$groupId', subgroupId: '$normalizedSubgroupId' },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const counts = aggregated
+      .map((item: any) => ({
+        groupId: String(item._id.groupId),
+        subgroupId: item._id.subgroupId ? String(item._id.subgroupId) : null,
+        count: Number(item.count) || 0,
+      }))
+      .filter((entry) => accessibleScopes.has(`${entry.groupId}::${entry.subgroupId || 'root'}`));
+
+    return res.json({ success: true, counts });
+  } catch (err: any) {
+    console.error('Errore calcolo unread chat summary:', err?.message || err);
+    return res.status(500).json({ error: 'Errore durante il recupero dei messaggi non letti' });
+  }
+});
+
 /* ==========================================================================
    4. EVENTS & POLLS API (EventModel / PollModel / OfficialEventModel)
    ========================================================================== */

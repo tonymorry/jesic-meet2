@@ -167,6 +167,16 @@ self.addEventListener('push', (event) => {
           data.title || 'JESic Meet',
           notificationOptions
         );
+
+        // Aggiorna il pallino/contatore sull'icona dell'app installata (PWA App Badging API)
+        try {
+          if (self.navigator && typeof self.navigator.setAppBadge === 'function') {
+            const rawCount = Number(data?.badgeCount || data?.unreadCount || 1);
+            await self.navigator.setAppBadge(rawCount > 0 ? rawCount : 1);
+          }
+        } catch (badgeErr) {
+          // Ignora se non supportato
+        }
       } catch (err) {
         // Fallback in caso di errori di matchAll
         await self.registration.showNotification(

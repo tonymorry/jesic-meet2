@@ -42,3 +42,29 @@ export const isInstalledPwa = (): boolean => {
 
   return false;
 };
+
+/**
+ * Aggiorna il pallino/badge numerico sull'icona della PWA installata (App Badging API)
+ * Supportato su iOS (16.4+ PWA aggiunte alla Home), Android WebAPK e Desktop PWA.
+ */
+export const updatePwaAppBadge = async (count: number): Promise<void> => {
+  if (typeof navigator === 'undefined') return;
+  try {
+    const nav = navigator as any;
+    const safeCount = Math.max(0, Math.floor(count || 0));
+    if (safeCount > 0) {
+      if (typeof nav.setAppBadge === 'function') {
+        await nav.setAppBadge(safeCount);
+      }
+    } else {
+      if (typeof nav.clearAppBadge === 'function') {
+        await nav.clearAppBadge();
+      } else if (typeof nav.setAppBadge === 'function') {
+        await nav.setAppBadge(0);
+      }
+    }
+  } catch {
+    // Browser/contesto senza supporto App Badging API: ignora silenziosamente
+  }
+};
+

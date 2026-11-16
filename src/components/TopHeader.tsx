@@ -19,7 +19,6 @@ import {
   Plus,
   Users,
   User as UserIcon,
-  Menu,
   MessageSquare,
   ArrowLeft,
 } from 'lucide-react';
@@ -40,7 +39,9 @@ export interface TopHeaderProps {
   onToggleSubgroupsMenu?: () => void;
   activeSubgroupName?: string;
   pendingInvitesCount?: number;
+  pendingGroupPollsCount?: number;
   pendingOfficialEventsCount?: number;
+  unreadChatCount?: number;
   isClientAdmin?: boolean;
   pendingClientRequestsCount?: number;
   isInsideGroup?: boolean;
@@ -61,7 +62,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onToggleSubgroupsMenu,
   activeSubgroupName,
   pendingInvitesCount = 0,
+  pendingGroupPollsCount = 0,
   pendingOfficialEventsCount = 0,
+  unreadChatCount = 0,
   isClientAdmin = false,
   pendingClientRequestsCount = 0,
   isInsideGroup = false,
@@ -108,7 +111,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     <header className="sticky top-0 z-30 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-b border-neutral-200/80 dark:border-neutral-800 px-3 sm:px-6 py-2 sm:py-2.5 transition-colors">
       <div className="flex items-center justify-between max-w-md sm:max-w-xl md:max-w-4xl lg:max-w-6xl xl:max-w-7xl mx-auto relative min-h-[42px]">
         
-        {/* PARTE SINISTRA: Su Mobile (se dentro gruppo) -> Hamburger + Indietro. Su PC (sempre) -> Logo completo con testo Brand */}
+        {/* PARTE SINISTRA: Su Mobile (se dentro gruppo) -> Indietro ai gruppi. Su PC (sempre) -> Logo completo con testo Brand */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 z-10">
           {isInsideGroup && (
             <div className="flex md:hidden items-center gap-1.5">
@@ -121,17 +124,6 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   aria-label="Torna indietro"
                 >
                   <ArrowLeft className="w-5 h-5 text-[#f23e2e] stroke-[2.5px]" />
-                </button>
-              )}
-              {onToggleSubgroupsMenu && (
-                <button
-                  type="button"
-                  onClick={onToggleSubgroupsMenu}
-                  className="p-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-100 transition-all flex items-center justify-center cursor-pointer active:scale-95 shadow-2xs border border-neutral-200/60 dark:border-neutral-700/60"
-                  title={activeSubgroupName ? `Cartella attiva: ${activeSubgroupName}` : 'Menu Sottogruppi e Cartelle'}
-                  aria-label="Menu Hamburger Sottogruppi"
-                >
-                  <Menu className="w-5 h-5 stroke-[2.5px] text-[#f23e2e]" />
                 </button>
               )}
             </div>
@@ -262,24 +254,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   </button>
                 )}
 
-                {/* Tasto 3 Lineette (Menu Hamburger Cartelle & Sottogruppi) su PC */}
-                {onToggleSubgroupsMenu && (
-                  <button
-                    type="button"
-                    onClick={onToggleSubgroupsMenu}
-                    className="p-1.5 rounded-xl text-xs font-bold bg-neutral-200/70 hover:bg-neutral-300/80 dark:bg-neutral-700/60 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-100 transition-all flex items-center justify-center cursor-pointer mr-1 active:scale-95"
-                    title={activeSubgroupName ? `Cartella attiva: ${activeSubgroupName}` : 'Sottogruppi e Cartelle'}
-                    aria-label="Menu Sottogruppi"
-                  >
-                    <Menu className="w-4 h-4 stroke-[2.5px] text-[#f23e2e]" />
-                  </button>
-                )}
-
                 {/* 1. Sondaggi (filtrati per sottogruppo attivo o gruppo generale) */}
                 <button
                   type="button"
                   onClick={() => onSelectTab('dashboard')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer relative ${
                     currentTab === 'dashboard'
                       ? 'bg-white dark:bg-neutral-900 text-[#f23e2e] shadow-xs font-black'
                       : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white'
@@ -287,6 +266,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 >
                   <Inbox className="w-3.5 h-3.5" />
                   <span>Sondaggi</span>
+                  {pendingGroupPollsCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-[#f23e2e] text-white text-[9px] font-black">
+                      {pendingGroupPollsCount}
+                    </span>
+                  )}
                 </button>
 
                 {/* 2. Eventi */}
@@ -347,7 +331,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 <button
                   type="button"
                   onClick={() => onSelectTab('chat')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer relative ${
                     currentTab === 'chat'
                       ? 'bg-white dark:bg-neutral-900 text-[#f23e2e] shadow-xs font-black'
                       : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white'
@@ -355,6 +339,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
                   <span>Chat</span>
+                  {unreadChatCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-[#f23e2e] text-white text-[9px] font-black animate-pulse">
+                      {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                    </span>
+                  )}
                 </button>
               </>
             )}
