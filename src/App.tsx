@@ -2490,14 +2490,12 @@ export default function App() {
 
   // Mappa messaggi non letti per cartella/sottogruppo del gruppo attivo (usata in Chat, TopHeader, BottomNav, SubgroupsDrawer)
   const activeGroupUnreadChatByScope: Record<string, number> = {};
-  let unreadChatCountForActiveGroup = 0;
   let unreadChatOtherFoldersCount = 0;
+  const activeScopeKey = activeSubgroupId || 'root';
   if (activeGroup) {
-    const activeScopeKey = activeSubgroupId || 'root';
     const rootCount = unreadChatCounts[`${activeGroup.id}::root`] || 0;
     if (rootCount > 0) {
       activeGroupUnreadChatByScope['root'] = rootCount;
-      unreadChatCountForActiveGroup += rootCount;
       if (activeScopeKey !== 'root') unreadChatOtherFoldersCount += rootCount;
     }
     if (Array.isArray(activeGroup.subgroups)) {
@@ -2506,12 +2504,14 @@ export default function App() {
         const c = unreadChatCounts[`${activeGroup.id}::${sub.id}`] || 0;
         if (c > 0) {
           activeGroupUnreadChatByScope[sub.id] = c;
-          unreadChatCountForActiveGroup += c;
           if (activeScopeKey !== sub.id) unreadChatOtherFoldersCount += c;
         }
       }
     }
   }
+  const unreadChatCountForCurrentScope = activeGroup
+    ? (activeGroupUnreadChatByScope[activeScopeKey] || 0)
+    : 0;
 
   // Totale globale notifiche per il pallino sull'icona dell'app scaricata (PWA Badging API)
   const totalUnreadChatsGlobal = Object.values(unreadChatCounts).reduce((sum, n) => sum + (n || 0), 0);
@@ -2582,7 +2582,7 @@ export default function App() {
             pendingInvitesCount={pendingInvitesCount}
             pendingGroupPollsCount={pendingGroupPollsCount}
             pendingOfficialEventsCount={pendingOfficialEventsCount}
-            unreadChatCount={unreadChatCountForActiveGroup}
+            unreadChatCount={unreadChatCountForCurrentScope}
             isClientAdmin={isClientAdmin}
             pendingClientRequestsCount={pendingClientRequestsCount}
             isInsideGroup={isInsideGroup}
@@ -2832,7 +2832,7 @@ export default function App() {
               pendingInvitesCount={pendingInvitesCount}
               pendingGroupPollsCount={pendingGroupPollsCount}
               pendingOfficialEventsCount={pendingOfficialEventsCount}
-              unreadChatCount={unreadChatCountForActiveGroup}
+              unreadChatCount={unreadChatCountForCurrentScope}
               isClientAdmin={isClientAdmin}
               pendingClientRequestsCount={pendingClientRequestsCount}
               isInsideGroup={isInsideGroup}

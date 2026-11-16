@@ -37,9 +37,10 @@ export const AvailabilityGrid: React.FC<AvailabilityGridProps> = ({
   activeSlotKey,
   onSelectSlotKey,
 }) => {
-  // Drag state per la selezione individuale
+  // Drag state per la selezione individuale (mouse desktop) e blocco doppio-trigger touch/click
   const isDraggingRef = useRef(false);
   const dragModeRef = useRef<'add' | 'remove'>('add');
+  const ignoreNextClickRef = useRef(false);
   const currentSlotsRef = useRef<Set<string>>(new Set(mySelectedSlots));
 
   useEffect(() => {
@@ -68,10 +69,21 @@ export const AvailabilityGrid: React.FC<AvailabilityGridProps> = ({
     };
   };
 
-  // Funzione per gestire inizio trascinamento (solo modalità individuale)
-  const handlePointerDown = (slotKey: string) => {
+  // Toggle singolo slot (usato al clic/tap semplice su mobile e tastiera)
+  const toggleSingleSlot = (slotKey: string) => {
+    const newSet = new Set(currentSlotsRef.current);
+    if (newSet.has(slotKey)) {
+      newSet.delete(slotKey);
+    } else {
+      newSet.add(slotKey);
+    }
+    currentSlotsRef.current = newSet;
+    onChangeMySlots(Array.from(newSet));
+  };
+
+  // Funzione per gestire inizio trascinamento SOLO su mouse desktop (modalità individuale)
+  const handleMousePointerDown = (slotKey: string) => {
     if (viewMode === 'group') {
-      // In modalità gruppo la selezione avviene solo su click/tap esplicito
       return;
     }
     isDraggingRef.current = true;
@@ -89,12 +101,10 @@ export const AvailabilityGrid: React.FC<AvailabilityGridProps> = ({
     onChangeMySlots(Array.from(newSet));
   };
 
-  const handlePointerEnter = (slotKey: string) => {
-    if (viewMode === 'group') {
-      // Non modificare lo slot selezionato al passaggio del mouse o durante lo scroll!
+  const handleMousePointerEnter = (slotKey: string) => {
+    if (viewMode === 'group' || !isDraggingRef.current) {
       return;
     }
-    if (!isDraggingRef.current) return;
 
     const newSet = new Set(currentSlotsRef.current);
     if (dragModeRef.current === 'add') {
@@ -112,25 +122,14 @@ export const AvailabilityGrid: React.FC<AvailabilityGridProps> = ({
 
   useEffect(() => {
     window.addEventListener('mouseup', handlePointerUp);
-    window.addEventListener('touchend', handlePointerUp);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
     return () => {
       window.removeEventListener('mouseup', handlePointerUp);
-      window.removeEventListener('touchend', handlePointerUp);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
     };
   }, [handlePointerUp]);
-
-  // Touch move handler per griglia mobile (calcola l'elemento sotto il dito SOLO in modalità individuale)
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (viewMode !== 'individual' || !isDraggingRef.current) return;
-    const touch = e.touches[0];
-    const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
-    if (targetElement) {
-      const slotKey = targetElement.getAttribute('data-slot-key');
-      if (slotKey) {
-        handlePointerEnter(slotKey);
-      }
-    }
-  };
 
   // Calcolo colore della cella in modalità Gruppo (When2meet gradiente rosso JESic)
   const getCellColorClass = (slotKey: string) => {
@@ -204,8 +203,8 @@ export const AvailabilityGrid: React.FC<AvailabilityGridProps> = ({
       <div className="flex items-center justify-between text-[11px] text-neutral-500 dark:text-neutral-400 px-1">
         {viewMode === 'individual' ? (
           <p className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#f23e2e] inline-block"></span>
-            <span>Trascina con il dito o mouse per selezionare quando sei disponibile</span>
+            <span className="w-2 h-2 rounded-full bg-[#f23e2e] inline-block shrink-0"></span>
+            <span>Tocca o clicca sulle caselle per selezionare quando sei disponibile (da PC puoi anche trascinare)</span>
           </p>
         ) : (
           <div className="flex items-center gap-2">
@@ -261,8 +260,7 @@ export const AvailabilityGrid: React.FC<AvailabilityGridProps> = ({
 
         return (
           <div
-            className="touch-none-grid bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-1.5 sm:p-2.5 shadow-xs w-full select-none"
-            onTouchMove={handleTouchMove}
+            className="touch-pan-y bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-1.5 sm:p-2.5 shadow-xs w-full select-none"
           >
             <div className="w-full">
               {/* Header Giorni (spazio proporzionale per ogni giorno, rientra sempre nel bordo) */}
@@ -335,28 +333,36 @@ export const AvailabilityGrid: React.FC<AvailabilityGridProps> = ({
                           type="button"
                           key={slotKey}
                           data-slot-key={slotKey}
-                          onMouseDown={() => {
-                            if (viewMode === 'individual') {
-                              handlePointerDown(slotKey);
+                          onPointerDown={(e) => {
+                            if (viewMode !== 'individual') return;
+                            if (e.pointerType === 'mouse' && e.button === 0) {
+                              ignoreNextClickRef.current = true;
+                              handleMousePointerDown(slotKey);
+                            } else {
+                              ignoreNextClickRef.current = false;
                             }
                           }}
-                          onMouseEnter={() => {
-                            if (viewMode === 'individual') {
-                              handlePointerEnter(slotKey);
+                          onPointerEnter={(e) => {
+                            if (viewMode === 'individual' && e.pointerType === 'mouse') {
+                              handleMousePointerEnter(slotKey);
                             }
                           }}
-                          onTouchStart={() => {
-                            if (viewMode === 'individual') {
-                              handlePointerDown(slotKey);
-                            }
+                          onKeyDown={() => {
+                            ignoreNextClickRef.current = false;
                           }}
                           onClick={() => {
                             if (viewMode === 'group') {
                               // Selezione e blocco slot esclusivamente su CLICK/TAP
                               onSelectSlotKey?.(slotKey);
+                              return;
                             }
+                            if (ignoreNextClickRef.current) {
+                              ignoreNextClickRef.current = false;
+                              return;
+                            }
+                            toggleSingleSlot(slotKey);
                           }}
-                          className={`${slotHeightClass} rounded-lg border flex items-center justify-center transition-all cursor-pointer relative overflow-hidden ${getCellColorClass(
+                          className={`${slotHeightClass} touch-pan-y rounded-lg border flex items-center justify-center transition-all cursor-pointer relative overflow-hidden ${getCellColorClass(
                             slotKey
                           )} ${
                             isSelectedSlot && viewMode === 'group'

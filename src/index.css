@@ -20,9 +20,9 @@
   }
 }
 
-/* Griglia When2meet touch interaction helpers */
+/* Griglia When2meet touch interaction helpers: consente sempre lo scroll verticale su mobile */
 .touch-none-grid {
-  touch-action: none;
+  touch-action: pan-y;
   user-select: none;
   -webkit-user-select: none;
 }
