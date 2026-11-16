@@ -15,6 +15,7 @@ class RealtimeClient {
   private currentUserId: string | null = null;
   private currentUserName: string | null = null;
   private isConnecting = false;
+  private hasConnectedOnce = false;
   public isConnected = false;
   public onlineUserIds: string[] = [];
 
@@ -37,9 +38,14 @@ class RealtimeClient {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
+        const isReconnect = this.hasConnectedOnce;
+        this.hasConnectedOnce = true;
         this.isConnecting = false;
         this.isConnected = true;
         this.emitLocal('connection_status', { connected: true });
+        if (isReconnect) {
+          this.emitLocal('realtime:reconnected', { timestamp: Date.now() });
+        }
 
         // Identifica l'utente se già loggato
         if (this.currentUserId) {

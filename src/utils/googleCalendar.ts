@@ -41,15 +41,50 @@ export function getOAuth2Client(
   } else if (refreshTokenOrTokens) {
     const rToken = refreshTokenOrTokens.refreshToken || refreshTokenOrTokens.googleRefreshToken;
     const aToken = refreshTokenOrTokens.accessToken || refreshTokenOrTokens.googleAccessToken;
-    const creds: Record<string, string> = {};
-    if (rToken) creds.refresh_token = rToken;
-    if (aToken) creds.access_token = aToken;
-    if (Object.keys(creds).length > 0) {
-      oauth2Client.setCredentials(creds);
+    // Se esiste un refresh_token valido, non passare un access_token potenzialmente scaduto senza expiry_date,
+    // altrimenti google-auth-library riusa il vecchio access_token invece di rinnovarlo.
+    if (rToken) {
+      oauth2Client.setCredentials({ refresh_token: rToken });
+    } else if (aToken) {
+      oauth2Client.setCredentials({ access_token: aToken });
     }
   }
 
   return oauth2Client;
+}
+
+async function executeWithCalendarAuth<T>(
+  tokens: { refreshToken?: string; accessToken?: string },
+  operation: (calendar: ReturnType<typeof google.calendar>) => Promise<T>
+): Promise<T> {
+  const { refreshToken, accessToken } = tokens;
+
+  if (refreshToken) {
+    try {
+      const oauth2Client = getOAuth2Client({ refreshToken });
+      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+      return await operation(calendar);
+    } catch (refreshErr: any) {
+      const status = refreshErr?.code || refreshErr?.response?.status;
+      const errMsg = String(refreshErr?.message || '');
+      const shouldFallbackToAccessToken =
+        Boolean(accessToken) &&
+        status !== 404 &&
+        status !== 410 &&
+        !/not found/i.test(errMsg);
+
+      if (shouldFallbackToAccessToken && accessToken) {
+        const fallbackClient = getOAuth2Client({ accessToken });
+        const fallbackCalendar = google.calendar({ version: 'v3', auth: fallbackClient });
+        return await operation(fallbackCalendar);
+      }
+      throw refreshErr;
+    }
+  }
+
+  const oauth2Client = getOAuth2Client({ accessToken });
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+  return await operation(calendar);
 }
 
 export interface CreateGoogleCalendarEventParams {
@@ -147,12 +182,6 @@ export async function createGoogleCalendarEvent(
   }
 
   try {
-    const oauth2Client = getOAuth2Client({
-      refreshToken: actualRefreshToken,
-      accessToken: actualAccessToken,
-    });
-    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-
     // Format RFC3339 con offset Europe/Rome esatto per evitare slittamento di 1 ora
     const startDateTime = formatRomeDateTimeRFC3339(date, startTime);
     const endDateTime = formatRomeDateTimeRFC3339(date, endTime);
@@ -207,12 +236,16 @@ export async function createGoogleCalendarEvent(
     const effectiveSendUpdates: 'all' | 'externalOnly' | 'none' =
       sendUpdates ?? (attendeeEmails.length > 0 ? 'all' : 'none');
 
-    const response = await calendar.events.insert({
-      calendarId: 'primary',
-      conferenceDataVersion: shouldCreateConference ? 1 : 0,
-      sendUpdates: effectiveSendUpdates,
-      requestBody: eventPayload,
-    });
+    const response = await executeWithCalendarAuth(
+      { refreshToken: actualRefreshToken, accessToken: actualAccessToken },
+      (calendar) =>
+        calendar.events.insert({
+          calendarId: 'primary',
+          conferenceDataVersion: shouldCreateConference ? 1 : 0,
+          sendUpdates: effectiveSendUpdates,
+          requestBody: eventPayload,
+        })
+    );
 
     const data = response.data;
     const realMeetLink =
@@ -284,15 +317,6 @@ export async function updateGoogleCalendarEvent(
   }
 
   try {
-    const oauth2Client = getOAuth2Client(refreshToken);
-    if (accessToken) {
-      oauth2Client.setCredentials({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-    }
-    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-
     const patchBody: any = {};
 
     if (eventData.title) {
@@ -332,22 +356,33 @@ export async function updateGoogleCalendarEvent(
 
     const effectiveSendUpdates: 'all' | 'externalOnly' | 'none' = eventData.sendUpdates ?? 'none';
 
-    let response: any;
-    try {
-      response = await calendar.events.patch({
-        calendarId: 'primary',
-        eventId: googleEventId,
-        sendUpdates: effectiveSendUpdates,
-        requestBody: patchBody,
-      });
-    } catch (patchErr: any) {
-      console.warn(`Patch con sendUpdates:'${effectiveSendUpdates}' non riuscito, ritento senza sendUpdates:`, patchErr?.message);
-      response = await calendar.events.patch({
-        calendarId: 'primary',
-        eventId: googleEventId,
-        requestBody: patchBody,
-      });
-    }
+    const response = await executeWithCalendarAuth(
+      { refreshToken, accessToken },
+      async (calendar) => {
+        try {
+          return await calendar.events.patch({
+            calendarId: 'primary',
+            eventId: googleEventId,
+            sendUpdates: effectiveSendUpdates,
+            requestBody: patchBody,
+          });
+        } catch (patchErr: any) {
+          const status = patchErr?.code || patchErr?.response?.status;
+          if (status === 401 || status === 403 || status === 404 || status === 410) {
+            throw patchErr;
+          }
+          console.warn(
+            `Patch con sendUpdates:'${effectiveSendUpdates}' non riuscito, ritento senza sendUpdates:`,
+            patchErr?.message
+          );
+          return await calendar.events.patch({
+            calendarId: 'primary',
+            eventId: googleEventId,
+            requestBody: patchBody,
+          });
+        }
+      }
+    );
 
     return {
       success: true,
@@ -399,16 +434,19 @@ export async function deleteGoogleCalendarEvent(
   }
 
   try {
-    const oauth2Client = getOAuth2Client({ refreshToken, accessToken });
-    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-
-    await calendar.events.delete({
-      calendarId: 'primary',
-      eventId: googleEventId,
-    });
+    await executeWithCalendarAuth({ refreshToken, accessToken }, (calendar) =>
+      calendar.events.delete({
+        calendarId: 'primary',
+        eventId: googleEventId,
+      })
+    );
 
     return { success: true };
   } catch (err: any) {
+    const status = err?.code || err?.response?.status;
+    if (status === 404 || status === 410 || /not found|deleted/i.test(String(err?.message || ''))) {
+      return { success: true };
+    }
     console.error('Errore cancellazione evento Google Calendar:', err.message || err);
     return {
       success: false,

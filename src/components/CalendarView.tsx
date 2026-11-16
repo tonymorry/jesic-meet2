@@ -9,7 +9,7 @@
  * - Cliccando su un evento nel calendario, si apre un modal con i dettagli (chi partecipa, data, ora, luogo, link Google Meet).
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MeetingEvent, User, ClientRequest } from '../types';
 import { isEventPassed } from '../utils/dateUtils';
 import {
@@ -65,6 +65,37 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   // Mese/Anno o Data corrente selezionata
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [selectedCalendarEvent, setSelectedCalendarEvent] = useState<MeetingEvent | null>(null);
+
+  // Sincronizza in tempo reale l'eventuale modale aperto nel calendario con modifiche o cancellazioni
+  useEffect(() => {
+    setSelectedCalendarEvent((prev) => {
+      if (!prev) return null;
+      if (prev.id.startsWith('b2b-')) {
+        const reqId = prev.clientRequestId || prev.id.replace(/^b2b-/, '');
+        const req = clientRequests.find((r) => r.id === reqId && r.status === 'confirmed' && r.finalizedSlot);
+        if (!req || !req.finalizedSlot) return null;
+        if (
+          prev.finalizedSlot?.date === req.finalizedSlot.date &&
+          prev.finalizedSlot?.startTime === req.finalizedSlot.startTime &&
+          prev.finalizedSlot?.endTime === req.finalizedSlot.endTime &&
+          prev.meetLink === (req.meetLink || undefined)
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          dates: [req.finalizedSlot.date],
+          startHour: parseInt(req.finalizedSlot.startTime.split(':')[0], 10) || 9,
+          endHour: parseInt(req.finalizedSlot.endTime.split(':')[0], 10) || 10,
+          meetLink: req.meetLink || undefined,
+          finalizedSlot: req.finalizedSlot,
+        };
+      }
+      const updated = allEvents.find((e) => e.id === prev.id);
+      if (!updated) return null;
+      return updated === prev ? prev : updated;
+    });
+  }, [allEvents, clientRequests]);
 
   // Giorno attualmente selezionato (di default oggi)
   const [selectedDateStr, setSelectedDateStr] = useState<string>(todayStr);

@@ -564,6 +564,17 @@ const handleUserSync = async (req: Request, res: Response) => {
         hasPassword: Boolean(existing.password && String(existing.password).trim().length > 0),
         groupMemberships: existing.groupMemberships || [],
       };
+      broadcastRealtimeEvent('user:updated', {
+        user: {
+          id: jsonUser.id,
+          name: jsonUser.name,
+          surname: jsonUser.surname,
+          email: jsonUser.email,
+          avatarUrl: jsonUser.avatarUrl,
+          googleCalendarConnected: jsonUser.googleCalendarConnected,
+          groupMemberships: jsonUser.groupMemberships,
+        },
+      });
       return res.json({ user: jsonUser, calendarScopeGranted: hasNewCalendarGrant || Boolean(existing.googleRefreshToken) });
     }
 
@@ -603,6 +614,18 @@ const handleUserSync = async (req: Request, res: Response) => {
       hasPassword: Boolean(newUserDoc.password && String(newUserDoc.password).trim().length > 0),
       groupMemberships: newUserDoc.groupMemberships || [],
     };
+
+    broadcastRealtimeEvent('user:updated', {
+      user: {
+        id: jsonUser.id,
+        name: jsonUser.name,
+        surname: jsonUser.surname,
+        email: jsonUser.email,
+        avatarUrl: jsonUser.avatarUrl,
+        googleCalendarConnected: jsonUser.googleCalendarConnected,
+        groupMemberships: jsonUser.groupMemberships,
+      },
+    });
 
     return res.status(201).json({ user: jsonUser, calendarScopeGranted: hasNewCalendarGrant });
   } catch (err: any) {
@@ -982,16 +1005,21 @@ app.patch('/api/users/:id/role', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Utente non trovato nel database' });
     }
 
+    const publicUserPayload = {
+      id: updatedUser._id || updatedUser.id,
+      name: updatedUser.name,
+      surname: updatedUser.surname,
+      email: updatedUser.email,
+      avatarUrl: updatedUser.avatarUrl || null,
+      googleCalendarConnected: Boolean(updatedUser.googleCalendarConnected),
+      groupMemberships: updatedUser.groupMemberships || [],
+    };
+    broadcastRealtimeEvent('user:updated', { user: publicUserPayload });
+
     return res.json({
       success: true,
       message: `Utente aggiornato con successo nel Database`,
-      user: {
-        id: updatedUser._id || updatedUser.id,
-        name: updatedUser.name,
-        surname: updatedUser.surname,
-        email: updatedUser.email,
-        groupMemberships: updatedUser.groupMemberships || [],
-      },
+      user: publicUserPayload,
     });
   } catch (err: any) {
     console.error('Errore aggiornamento ruolo UserModel MongoDB:', err.message);
@@ -1022,6 +1050,18 @@ app.patch('/api/users/:id', async (req: Request, res: Response) => {
     if (!updatedUser) {
       return res.status(404).json({ error: 'Utente non trovato nel database' });
     }
+
+    broadcastRealtimeEvent('user:updated', {
+      user: {
+        id: updatedUser._id || updatedUser.id,
+        name: updatedUser.name,
+        surname: updatedUser.surname,
+        email: updatedUser.email,
+        avatarUrl: updatedUser.avatarUrl || null,
+        googleCalendarConnected: Boolean(updatedUser.googleCalendarConnected),
+        groupMemberships: updatedUser.groupMemberships || [],
+      },
+    });
 
     return res.json({
       success: true,
@@ -2803,9 +2843,10 @@ const syncConfirmedEventAcrossUserCalendars = async (
         });
 
         if (updRes.success) {
+          console.log(`[Google Calendar] Evento ${existingGoogleEventId} aggiornato con successo nel calendario dell'utente ${uid}.`);
           continue;
         }
-        if (!updRes.error || !/(404|410|not found)/i.test(updRes.error)) {
+        if (!updRes.error || !/(404|410|not found|deleted)/i.test(updRes.error)) {
           console.warn(`[Google Calendar] Warning aggiornamento utente ${uid} (${existingGoogleEventId}):`, updRes.error);
           continue;
         }
@@ -3175,6 +3216,14 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
       existingEvent.eventType === 'official' ||
       updates.status === 'confirmed';
 
+    // Non permettere al payload client di sovrascrivere gli ID Google Calendar già salvati sul server
+    delete updates.googleCalendarEvents;
+    delete updates.googleEventId;
+    delete updates.googleCalendarEventId;
+    if (updates.meetLink && isPlaceholderMeetLink(updates.meetLink) && existingEvent.meetLink && !isPlaceholderMeetLink(existingEvent.meetLink)) {
+      delete updates.meetLink;
+    }
+
     if (isBeingConfirmedNow || (isAlreadyConfirmedOrOfficial && hasCalendarRelevantUpdate)) {
       try {
         const existingObj = existingEvent.toObject();
@@ -3185,10 +3234,9 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
             updates.meetLink && !isPlaceholderMeetLink(updates.meetLink)
               ? updates.meetLink
               : existingObj.meetLink,
-          googleCalendarEvents:
-            Array.isArray(updates.googleCalendarEvents)
-              ? updates.googleCalendarEvents
-              : existingObj.googleCalendarEvents,
+          googleCalendarEvents: existingObj.googleCalendarEvents || [],
+          googleEventId: existingObj.googleEventId,
+          googleCalendarEventId: existingObj.googleCalendarEventId,
         };
 
         const requesterId = String(
@@ -3312,10 +3360,23 @@ const handleDeleteEventOrPoll = async (req: Request, res: Response) => {
     // 3. Solo DOPO aver avvisato Google, esegui l'eliminazione da MongoDB
     await EventModel.deleteOne({ $or: [{ _id: id }, { id }] });
     await EventResponseModel.deleteMany({ eventId: id });
-    await ClientRequestModel.updateMany(
-      { pollEventId: id },
-      { $set: { status: 'pending', pollEventId: null } }
-    );
+    const affectedRequests = await ClientRequestModel.find({ pollEventId: id }).lean();
+    if (affectedRequests.length > 0) {
+      await ClientRequestModel.updateMany(
+        { pollEventId: id },
+        { $set: { status: 'pending', pollEventId: null } }
+      );
+      for (const reqItem of affectedRequests as any[]) {
+        broadcastRealtimeEvent('client_request:updated', {
+          request: {
+            ...reqItem,
+            id: reqItem._id || reqItem.id,
+            status: 'pending',
+            pollEventId: null,
+          },
+        });
+      }
+    }
 
     broadcastRealtimeEvent('event:deleted', { eventId: id });
 
@@ -3673,11 +3734,15 @@ app.post('/api/responses', async (req: Request, res: Response) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    const mappedResponse = {
+      ...resp.toObject(),
+      id: resp._id || resp.id,
+    };
+
+    broadcastRealtimeEvent('response:updated', { response: mappedResponse });
+
     return res.status(201).json({
-      response: {
-        ...resp.toObject(),
-        id: resp._id || resp.id,
-      },
+      response: mappedResponse,
     });
   } catch (err: any) {
     console.error('Errore salvataggio EventResponseModel MongoDB:', err.message);
@@ -3746,12 +3811,16 @@ app.post('/api/client-requests', async (req: Request, res: Response) => {
       status: reqData.status || 'pending',
     });
 
+    const mappedRequest = {
+      ...created.toObject(),
+      id: created._id || created.id,
+      groupId: created.groupId || null,
+    };
+
+    broadcastRealtimeEvent('client_request:created', { request: mappedRequest });
+
     return res.status(201).json({
-      request: {
-        ...created.toObject(),
-        id: created._id || created.id,
-        groupId: created.groupId || null,
-      },
+      request: mappedRequest,
     });
   } catch (err: any) {
     console.error('Errore salvataggio ClientRequestModel MongoDB:', err.message);
@@ -3790,7 +3859,9 @@ app.patch('/api/client-requests/:id', async (req: Request, res: Response) => {
     if (!updated) {
       return res.status(404).json({ error: 'Richiesta non trovata nel database' });
     }
-    return res.json({ success: true, request: { ...updated.toObject(), id: updated._id || updated.id } });
+    const mappedRequest = { ...updated.toObject(), id: updated._id || updated.id };
+    broadcastRealtimeEvent('client_request:updated', { request: mappedRequest });
+    return res.json({ success: true, request: mappedRequest });
   } catch (err: any) {
     console.error('Errore aggiornamento ClientRequestModel MongoDB:', err.message);
     return res.status(500).json({ error: 'Errore aggiornamento richiesta cliente in MongoDB' });
@@ -3934,11 +4005,14 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
       return res.status(404).json({ error: 'Richiesta non trovata nel database' });
     }
 
+    const mappedRequest = { ...updated.toObject(), id: updated._id || updated.id };
+    broadcastRealtimeEvent('client_request:updated', { request: mappedRequest });
+
     return res.json({
       success: true,
       message: 'Richiesta confermata con successo in MongoDB e sincronizzata su Google Calendar',
       meetLink: finalMeet,
-      request: { ...updated.toObject(), id: updated._id || updated.id },
+      request: mappedRequest,
       ...(updatedLinkedEvent ? { event: updatedLinkedEvent } : {}),
     });
   } catch (err: any) {

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   User,
   MeetingEvent,
@@ -316,23 +316,95 @@ export default function App() {
 
   useRealtimeSubscription('event:updated', (data) => {
     if (data?.event) {
-      setEvents((prev) => prev.map((e) => (e.id === data.event.id ? { ...e, ...data.event } : e)));
+      setEvents((prev) => {
+        const exists = prev.some((e) => e.id === data.event.id);
+        if (exists) {
+          return prev.map((e) => (e.id === data.event.id ? { ...e, ...data.event } : e));
+        }
+        return [data.event, ...prev];
+      });
     }
   });
 
   useRealtimeSubscription('event:deleted', (data) => {
     if (data?.eventId) {
       setEvents((prev) => prev.filter((e) => e.id !== data.eventId));
+      setResponses((prev) => prev.filter((r) => r.eventId !== data.eventId));
       if (selectedEventId === data.eventId) {
         setSelectedEventId(null);
       }
     }
   });
 
-  // Sincronizzazione Dati da MongoDB Atlas tramite Express API
-  useEffect(() => {
+  useRealtimeSubscription('response:updated', (data) => {
+    if (data?.response) {
+      const resp = data.response;
+      setResponses((prev) => {
+        const idx = prev.findIndex(
+          (r) => r.id === resp.id || (r.eventId === resp.eventId && r.userId === resp.userId)
+        );
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...resp };
+          return next;
+        }
+        return [...prev, resp];
+      });
+    }
+  });
+
+  useRealtimeSubscription('client_request:created', (data) => {
+    if (data?.request) {
+      const req = data.request;
+      setClientRequests((prev) => {
+        const exists = prev.some((r) => r.id === req.id);
+        if (exists) {
+          return prev.map((r) => (r.id === req.id ? { ...r, ...req } : r));
+        }
+        return [req, ...prev];
+      });
+    }
+  });
+
+  useRealtimeSubscription('client_request:updated', (data) => {
+    if (data?.request) {
+      const req = data.request;
+      setClientRequests((prev) => {
+        const exists = prev.some((r) => r.id === req.id);
+        if (exists) {
+          return prev.map((r) => (r.id === req.id ? { ...r, ...req } : r));
+        }
+        return [req, ...prev];
+      });
+    }
+  });
+
+  useRealtimeSubscription('user:updated', (data) => {
+    if (data?.user) {
+      const incomingUser = data.user;
+      setUsers((prev) => {
+        const exists = prev.some((u) => u.id === incomingUser.id);
+        if (exists) {
+          return prev.map((u) => (u.id === incomingUser.id ? { ...u, ...incomingUser } : u));
+        }
+        return [...prev, incomingUser];
+      });
+      setCurrentUser((prevUser) => {
+        if (!prevUser || prevUser.id !== incomingUser.id) return prevUser;
+        return {
+          ...prevUser,
+          ...incomingUser,
+          role: incomingUser.role || prevUser.role || 'user',
+          systemRole: incomingUser.role || prevUser.systemRole || 'user',
+        };
+      });
+    }
+  });
+
+  // Funzione riutilizzabile di sincronizzazione completa da MongoDB Atlas tramite Express API
+  const syncAllAppData = useCallback(() => {
     // 1. Carica e sincronizza Utenti e Ruolo dal Database
-    fetch('/api/users')
+    fetch('/api/users', { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && Array.isArray(data.users) && data.users.length > 0) {
@@ -359,7 +431,7 @@ export default function App() {
         setIsAuthDetermined(true);
       });
 
-    // 2. Carica Gruppi dal Database (Sincronizzazione reale: se un gruppo è stato eliminato dal DB, scompare subito)
+    // 2. Carica Gruppi dal Database
     fetch('/api/groups', { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -367,7 +439,6 @@ export default function App() {
           setGroups(data.groups);
           localStorage.setItem(STORAGE_GROUPS_KEY, JSON.stringify(data.groups));
 
-          // Se il gruppo attivo memorizzato in precedenza è stato eliminato dal DB, resettalo
           setActiveGroupId((prevActiveId) => {
             if (prevActiveId && !data.groups.some((g: any) => g.id === prevActiveId)) {
               setActiveSubgroupId(null);
@@ -377,7 +448,6 @@ export default function App() {
             return prevActiveId;
           });
 
-          // Pulisci i riferimenti orfani dai memberships dell'utente corrente
           const validGroupIds = new Set(data.groups.map((g: any) => g.id));
           setCurrentUser((prevUser) => {
             if (!prevUser) return null;
@@ -391,7 +461,6 @@ export default function App() {
             return prevUser;
           });
 
-          // Pulisci eventuali eventi appartenenti a gruppi non più esistenti
           setEvents((prevEvents) =>
             prevEvents.filter((ev) => !ev.groupId || validGroupIds.has(ev.groupId))
           );
@@ -433,27 +502,21 @@ export default function App() {
       .catch((e) => console.log('[Sync /api/client-requests]', e));
   }, []);
 
-  // Ri-sincronizza istantaneamente i gruppi quando l'utente torna sulla pagina (es. dopo aver modificato MongoDB)
+  // Caricamento iniziale completo
+  useEffect(() => {
+    syncAllAppData();
+  }, [syncAllAppData]);
+
+  // Ri-sincronizzazione completa al ripristino della connessione WebSocket
+  useRealtimeSubscription('realtime:reconnected', () => {
+    syncAllAppData();
+  });
+
+  // Ri-sincronizza istantaneamente tutti i dati quando l'utente torna sulla pagina
   useEffect(() => {
     const handleReSyncOnFocus = () => {
       if (document.visibilityState === 'visible') {
-        fetch('/api/groups', { cache: 'no-store' })
-          .then((res) => (res.ok ? res.json() : null))
-          .then((data) => {
-            if (data && Array.isArray(data.groups)) {
-              setGroups(data.groups);
-              localStorage.setItem(STORAGE_GROUPS_KEY, JSON.stringify(data.groups));
-              setActiveGroupId((prevActiveId) => {
-                if (prevActiveId && !data.groups.some((g: any) => g.id === prevActiveId)) {
-                  setActiveSubgroupId(null);
-                  localStorage.removeItem(STORAGE_ACTIVE_GROUP_KEY);
-                  return null;
-                }
-                return prevActiveId;
-              });
-            }
-          })
-          .catch(() => {});
+        syncAllAppData();
       }
     };
 
@@ -463,7 +526,7 @@ export default function App() {
       window.removeEventListener('focus', handleReSyncOnFocus);
       document.removeEventListener('visibilitychange', handleReSyncOnFocus);
     };
-  }, []);
+  }, [syncAllAppData]);
 
 
   // Stato Splash Screen iniziale:
@@ -494,7 +557,11 @@ export default function App() {
   // Stato UI Navigazione:
   // - Fuori dal gruppo: 'groups' | 'polls' | 'profile'
   // - Dentro un gruppo: 'dashboard' | 'events' | 'calendar' | 'requests' | 'profile'
-  const [currentTab, setCurrentTab] = useState<NavTab>('groups');
+  const [currentTab, setCurrentTab] = useState<NavTab>(() =>
+    typeof window !== 'undefined' && localStorage.getItem(STORAGE_ACTIVE_GROUP_KEY)
+      ? 'dashboard'
+      : 'groups'
+  );
 
   // Modali Creazione
   const [isChoiceModalOpen, setIsChoiceModalOpen] = useState(false);
@@ -574,10 +641,16 @@ export default function App() {
   const canAccessGroupClientRequests = isInsideGroup && isGroupAdminClienti;
   const isClientAdmin = canAccessGroupClientRequests;
 
-  // Protezione Rotta Richieste: accessibile SOLO all'interno del gruppo e per admin_clienti del gruppo
+  // Protezione Rotta Richieste e Tab Default Gruppo ('dashboard' = Sondaggi appena si entra nel gruppo)
   useEffect(() => {
     if (currentTab === 'requests' && !canAccessGroupClientRequests) {
       setCurrentTab(isInsideGroup ? 'dashboard' : 'groups');
+      return;
+    }
+    if (isInsideGroup && (currentTab === 'groups' || currentTab === 'polls')) {
+      setCurrentTab('dashboard');
+    } else if (!isInsideGroup && ['dashboard', 'events', 'requests', 'chat'].includes(currentTab)) {
+      setCurrentTab('groups');
     }
   }, [currentTab, canAccessGroupClientRequests, isInsideGroup]);
 
@@ -674,6 +747,8 @@ export default function App() {
 
         if (qTab) {
           setCurrentTab(qTab);
+        } else if (qGroupId) {
+          setCurrentTab('dashboard');
         }
       } catch (err) {
         console.warn('Errore parsing parametri deep link:', err);
@@ -861,7 +936,7 @@ export default function App() {
           };
           setUsers((prev) => [...prev.filter((u) => u.id !== createdUser.id), createdUser]);
           setCurrentUser(createdUser);
-          setCurrentTab('groups');
+          setCurrentTab(localStorage.getItem(STORAGE_ACTIVE_GROUP_KEY) ? 'dashboard' : 'groups');
           return;
         }
       }
@@ -877,7 +952,7 @@ export default function App() {
     };
     setUsers((prev) => [...prev, fallbackUser]);
     setCurrentUser(fallbackUser);
-    setCurrentTab('groups');
+    setCurrentTab(localStorage.getItem(STORAGE_ACTIVE_GROUP_KEY) ? 'dashboard' : 'groups');
   };
 
   const handleLoginUser = async (user: User) => {
@@ -903,7 +978,7 @@ export default function App() {
           };
           setUsers((prev) => [...prev.filter((u) => u.id !== freshUser.id && u.email.toLowerCase() !== freshUser.email.toLowerCase()), freshUser]);
           setCurrentUser(freshUser);
-          setCurrentTab('groups');
+          setCurrentTab(localStorage.getItem(STORAGE_ACTIVE_GROUP_KEY) ? 'dashboard' : 'groups');
           return;
         }
       }
@@ -918,7 +993,7 @@ export default function App() {
       systemRole: fallbackRole,
     };
     setCurrentUser(fallbackUser);
-    setCurrentTab('groups');
+    setCurrentTab(localStorage.getItem(STORAGE_ACTIVE_GROUP_KEY) ? 'dashboard' : 'groups');
   };
 
   // Se l'utente corrente accede e non ha ancora impostato una password, richiedila subito
@@ -956,7 +1031,7 @@ export default function App() {
           if (authUser.hasPassword === false) {
             setUserPendingPassword(authUser);
           } else {
-            setCurrentTab('groups');
+            setCurrentTab(localStorage.getItem(STORAGE_ACTIVE_GROUP_KEY) ? 'dashboard' : 'groups');
           }
           return;
         }
@@ -2160,7 +2235,7 @@ export default function App() {
   };
 
   // AGGIORNAMENTO INVITATI
-  const handleUpdateEventInvitees = (
+  const handleUpdateEventInvitees = async (
     eventId: string,
     newInvitees: InviteeConfig[],
     newUsersToRegister?: User[]
@@ -2171,6 +2246,31 @@ export default function App() {
     setEvents((prev) =>
       prev.map((e) => (e.id === eventId ? { ...e, invitees: newInvitees } : e))
     );
+    try {
+      const res = await fetch(`/api/events/${eventId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(currentUser?.googleAccessToken ? { Authorization: `Bearer ${currentUser.googleAccessToken}` } : {}),
+        },
+        body: JSON.stringify({
+          invitees: newInvitees,
+          userId: currentUser?.id,
+          googleAccessToken: currentUser?.googleAccessToken,
+          googleRefreshToken: currentUser?.googleRefreshToken,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.event) {
+          setEvents((prev) =>
+            prev.map((e) => (e.id === eventId ? { ...e, ...data.event } : e))
+          );
+        }
+      }
+    } catch (e) {
+      console.log('[API update invitees sync]', e);
+    }
   };
 
   // Badge conteggio notifiche
@@ -2398,7 +2498,7 @@ export default function App() {
                 </div>
 
                 {/* 1. Sondaggi del Gruppo (filtrati per Sottogruppo / Cartella) */}
-                {currentTab === 'dashboard' && (
+                {(currentTab === 'dashboard' || currentTab === 'groups' || currentTab === 'polls') && (
                   <Dashboard
                     currentUser={currentUser}
                     allEvents={events.filter((e) =>
@@ -2694,7 +2794,7 @@ export default function App() {
               prev.map((u) => (u.id === updatedUser.id ? updatedUser : u))
             );
             setUserPendingPassword(null);
-            setCurrentTab('groups');
+            setCurrentTab(localStorage.getItem(STORAGE_ACTIVE_GROUP_KEY) ? 'dashboard' : 'groups');
           }}
         />
       )}

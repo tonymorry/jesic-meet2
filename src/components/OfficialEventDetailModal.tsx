@@ -8,7 +8,7 @@
  * 4. Per l'organizzatore: pulsante "Modifica Evento" per aggiornare dettagli, orari o invitati
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MeetingEvent, User } from '../types';
 import { UserAvatar } from './UserAvatar';
 import {
@@ -51,6 +51,9 @@ export const OfficialEventDetailModal: React.FC<OfficialEventDetailModalProps> =
   onEventUpdated,
 }) => {
   const [currentEvent, setCurrentEvent] = useState<MeetingEvent>(event);
+  useEffect(() => {
+    setCurrentEvent(event);
+  }, [event]);
   const [isLoading, setIsLoading] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
