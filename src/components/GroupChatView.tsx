@@ -1326,61 +1326,66 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
 
       {/* Header Chat / Barra Azioni Selezione Messaggio WhatsApp */}
       {selectedMessage ? (
-        <div className="px-3 sm:px-4 py-2.5 sm:py-3 bg-neutral-900 text-white border-b border-neutral-800 flex items-center justify-between shadow-md z-30 shrink-0 animate-in fade-in">
-          <div className="flex items-center gap-2.5 sm:gap-3">
+        <div className="w-full max-w-full px-2 sm:px-4 py-2 sm:py-3 bg-neutral-900 text-white border-b border-neutral-800 flex items-center justify-between gap-1.5 shadow-md z-30 shrink-0 overflow-hidden box-border animate-in fade-in">
+          <div className="flex items-center gap-1 sm:gap-2.5 min-w-0">
             <button
               type="button"
+              data-mobile-compact="true"
               onClick={() => setSelectedMessage(null)}
-              className="p-2.5 md:p-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+              className="w-[38px] h-[42px] sm:w-auto sm:h-auto sm:p-1.5 flex items-center justify-center rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer shrink-0"
               title="Annulla selezione"
             >
-              <X className="w-5.5 h-5.5 md:w-5 md:h-5 stroke-[2.2px]" />
+              <X className="w-5 h-5 stroke-[2.2px]" />
             </button>
-            <span className="text-sm md:text-xs sm:text-sm font-black tracking-wide">
-              1 selezionato
+            <span className="text-xs sm:text-sm font-black tracking-tight sm:tracking-wide whitespace-nowrap">
+              <span className="sm:hidden">1 sel.</span>
+              <span className="hidden sm:inline">1 selezionato</span>
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {/* Tasto Rispondi */}
             <button
               type="button"
+              data-mobile-compact="true"
               onClick={() => {
                 setReplyingTo(selectedMessage);
                 setSelectedMessage(null);
               }}
               title="Rispondi al messaggio"
-              className="p-2.5 md:p-2 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+              className="w-[38px] h-[42px] sm:w-auto sm:h-auto sm:p-2 flex items-center justify-center rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer shrink-0"
             >
-              <CornerUpLeft className="w-5 h-5 md:w-4 md:h-4" />
+              <CornerUpLeft className="w-[18px] h-[18px] sm:w-4 sm:h-4" />
             </button>
 
             {/* Tasto Copia (se testo presente) */}
             {selectedMessage.content && (
               <button
                 type="button"
+                data-mobile-compact="true"
                 onClick={() => {
                   handleCopyMessage(selectedMessage.content);
                   setSelectedMessage(null);
                 }}
                 title="Copia testo"
-                className="p-2.5 md:p-2 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                className="w-[38px] h-[42px] sm:w-auto sm:h-auto sm:p-2 flex items-center justify-center rounded-xl hover:bg-neutral-800 active:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer shrink-0"
               >
-                <Copy className="w-5 h-5 md:w-4 md:h-4" />
+                <Copy className="w-[18px] h-[18px] sm:w-4 sm:h-4" />
               </button>
             )}
 
             {/* Tasto Info Messaggio (Chi ha visualizzato / letto) */}
             <button
               type="button"
+              data-mobile-compact="true"
               onClick={() => {
                 setInfoModalMessage(selectedMessage);
                 setSelectedMessage(null);
               }}
               title="Info messaggio (Visualizzazioni)"
-              className="flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-3 py-2.5 md:px-2.5 md:py-1.5 rounded-xl bg-neutral-800 hover:bg-sky-600 active:bg-sky-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
+              className="w-[38px] h-[42px] sm:w-auto sm:h-auto flex items-center justify-center gap-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-neutral-800 hover:bg-sky-600 active:bg-sky-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0"
             >
-              <Info className="w-4.5 h-4.5 md:w-3.5 md:h-3.5 text-sky-400" />
+              <Info className="w-[18px] h-[18px] sm:w-3.5 sm:h-3.5 text-sky-400" />
               <span className="hidden sm:inline">Info</span>
             </button>
 
@@ -1389,28 +1394,30 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
               <>
                 <button
                   type="button"
+                  data-mobile-compact="true"
                   onClick={() => {
                     handleStartEdit(selectedMessage);
                     setSelectedMessage(null);
                   }}
                   title="Modifica messaggio"
-                  className="flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-3 py-2.5 md:px-2.5 md:py-1.5 rounded-xl bg-neutral-800 hover:bg-[#00a884] active:bg-[#008f6f] text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
+                  className="w-[38px] h-[42px] sm:w-auto sm:h-auto flex items-center justify-center gap-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-neutral-800 hover:bg-[#00a884] active:bg-[#008f6f] text-white text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0"
                 >
-                  <Edit2 className="w-4.5 h-4.5 md:w-3.5 md:h-3.5 text-emerald-400" />
+                  <Edit2 className="w-[18px] h-[18px] sm:w-3.5 sm:h-3.5 text-emerald-400" />
                   <span className="hidden sm:inline">Modifica</span>
                 </button>
 
                 <button
                   type="button"
+                  data-mobile-compact="true"
                   onClick={() => {
                     const idToDelete = selectedMessage.id;
                     setSelectedMessage(null);
                     handleDeleteMessage(idToDelete);
                   }}
                   title="Elimina per tutti"
-                  className="flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-3 py-2.5 md:px-2.5 md:py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 active:bg-red-800 text-red-400 text-xs font-bold transition-all cursor-pointer shadow-xs"
+                  className="w-[38px] h-[42px] sm:w-auto sm:h-auto flex items-center justify-center gap-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 active:bg-red-800 text-red-400 text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0"
                 >
-                  <Trash2 className="w-4.5 h-4.5 md:w-3.5 md:h-3.5" />
+                  <Trash2 className="w-[18px] h-[18px] sm:w-3.5 sm:h-3.5" />
                   <span className="hidden sm:inline">Elimina</span>
                 </button>
               </>
@@ -1420,15 +1427,16 @@ export const GroupChatView: React.FC<GroupChatViewProps> = ({
             {selectedMessage.authorId !== currentUser.id && isGroupAdmin && (
               <button
                 type="button"
+                data-mobile-compact="true"
                 onClick={() => {
                   const idToDelete = selectedMessage.id;
                   setSelectedMessage(null);
                   handleDeleteMessage(idToDelete);
                 }}
                 title="Elimina messaggio come Admin"
-                className="p-2.5 md:p-2 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center rounded-xl hover:bg-red-950 text-red-400 transition-colors cursor-pointer"
+                className="w-[38px] h-[42px] sm:w-auto sm:h-auto sm:p-2 flex items-center justify-center rounded-xl hover:bg-red-950 text-red-400 transition-colors cursor-pointer shrink-0"
               >
-                <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
+                <Trash2 className="w-[18px] h-[18px] sm:w-4 sm:h-4" />
               </button>
             )}
           </div>
