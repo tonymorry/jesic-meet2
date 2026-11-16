@@ -517,6 +517,11 @@ export interface IFinalizedSlot {
   endTime: string;
 }
 
+export interface IGoogleCalendarUserEvent {
+  userId: string;
+  googleEventId: string;
+}
+
 export interface IEvent {
   _id?: string;
   id?: string;
@@ -534,6 +539,7 @@ export interface IEvent {
   meetLink?: string;
   googleCalendarEventId?: string;
   googleEventId?: string;
+  googleCalendarEvents?: IGoogleCalendarUserEvent[];
   pollDeadline?: string;
   status: 'voting' | 'ready' | 'confirmed';
   invitees: IInvitee[];
@@ -641,6 +647,16 @@ const EventSchema: Schema<IEvent> = new Schema(
     googleEventId: {
       type: String,
       default: null,
+    },
+    googleCalendarEvents: {
+      type: [
+        {
+          userId: { type: String, required: true },
+          googleEventId: { type: String, required: true },
+        },
+      ],
+      _id: false,
+      default: [],
     },
     pollDeadline: {
       type: String,

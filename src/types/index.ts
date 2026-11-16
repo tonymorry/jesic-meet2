@@ -134,6 +134,7 @@ export interface MeetingEvent {
   meetLink?: string;
   googleEventId?: string;
   googleCalendarEventId?: string;
+  googleCalendarEvents?: Array<{ userId: string; googleEventId: string }>;
   pollDeadline?: string; // ISO datetime
   status: EventStatus;
   finalizedSlot?: FinalizedSlot;

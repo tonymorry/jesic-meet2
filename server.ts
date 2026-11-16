@@ -2642,6 +2642,295 @@ app.get('/api/events', async (req: Request, res: Response) => {
   }
 });
 
+const isPlaceholderMeetLink = (link?: string | null): boolean =>
+  Boolean(link && /meet\.google\.com\/jes-/i.test(link));
+
+const resolveEventDateAndTimes = (eventObj: any) => {
+  const targetDate =
+    eventObj?.finalizedSlot?.date ||
+    (typeof eventObj?.finalDate === 'object' && eventObj?.finalDate?.date) ||
+    (typeof eventObj?.finalDate === 'string' && eventObj.finalDate.trim() ? eventObj.finalDate.trim() : undefined) ||
+    (Array.isArray(eventObj?.dates) && eventObj.dates[0]) ||
+    new Date().toISOString().split('T')[0];
+
+  const startTime =
+    eventObj?.finalizedSlot?.startTime ||
+    (typeof eventObj?.finalDate === 'object' && eventObj?.finalDate?.startTime) ||
+    (eventObj?.startHour !== undefined ? `${String(eventObj.startHour).padStart(2, '0')}:00` : '09:00');
+
+  const endTime =
+    eventObj?.finalizedSlot?.endTime ||
+    (typeof eventObj?.finalDate === 'object' && eventObj?.finalDate?.endTime) ||
+    (eventObj?.endHour !== undefined ? `${String(eventObj.endHour).padStart(2, '0')}:00` : '10:00');
+
+  return { targetDate, startTime, endTime };
+};
+
+const buildUserMap = (users: any[]) => {
+  const map = new Map<string, any>();
+  for (const u of users) {
+    if (u?._id) map.set(String(u._id), u);
+    if (u?.id) map.set(String(u.id), u);
+  }
+  return map;
+};
+
+interface CalendarTokenOverride {
+  accessToken?: string;
+  refreshToken?: string;
+}
+
+const syncConfirmedEventAcrossUserCalendars = async (
+  eventObj: any,
+  overrideTokensByUserId: Record<string, CalendarTokenOverride> = {}
+): Promise<{
+  meetLink?: string;
+  primaryGoogleEventId: string | null;
+  googleCalendarEvents: Array<{ userId: string; googleEventId: string }>;
+}> => {
+  const existingMap = new Map<string, string>();
+  if (Array.isArray(eventObj?.googleCalendarEvents)) {
+    for (const entry of eventObj.googleCalendarEvents) {
+      if (entry?.userId && entry?.googleEventId) {
+        existingMap.set(String(entry.userId), String(entry.googleEventId));
+      }
+    }
+  }
+  const legacyCreatorEventId = eventObj?.googleEventId || eventObj?.googleCalendarEventId;
+  if (eventObj?.creatorId && legacyCreatorEventId && !existingMap.has(String(eventObj.creatorId))) {
+    existingMap.set(String(eventObj.creatorId), String(legacyCreatorEventId));
+  }
+
+  const declinedIds = new Set<string>(
+    (eventObj?.participants || [])
+      .filter((p: any) => p?.status === 'declined' && p?.userId)
+      .map((p: any) => String(p.userId))
+  );
+
+  const rawCandidateIds: string[] = [];
+  if (eventObj?.creatorId) rawCandidateIds.push(String(eventObj.creatorId));
+  for (const inv of eventObj?.invitees || []) {
+    if (inv?.userId) rawCandidateIds.push(String(inv.userId));
+  }
+  for (const part of eventObj?.participants || []) {
+    if (part?.userId && part.status !== 'declined') {
+      rawCandidateIds.push(String(part.userId));
+    }
+  }
+
+  const normalizedExtraEmails = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(eventObj?.externalInviteEmails) ? eventObj.externalInviteEmails : []),
+        ...(eventObj?.clientInfo?.contactEmail ? [eventObj.clientInfo.contactEmail] : []),
+      ]
+        .map((e: any) => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
+        .filter((e: string) => e.includes('@'))
+    )
+  );
+
+  const emailMatchedUsers =
+    normalizedExtraEmails.length > 0
+      ? await UserModel.find({ email: { $in: normalizedExtraEmails } }).lean()
+      : [];
+
+  const emailToRegisteredUserId = new Map<string, string>();
+  for (const u of emailMatchedUsers as any[]) {
+    const emailKey = (u.email || '').trim().toLowerCase();
+    const uid = String(u._id || u.id);
+    if (emailKey && uid) {
+      emailToRegisteredUserId.set(emailKey, uid);
+      if (!declinedIds.has(uid)) {
+        rawCandidateIds.push(uid);
+      }
+    }
+  }
+
+  const externalOnlyEmails = normalizedExtraEmails.filter((email) => !emailToRegisteredUserId.has(email));
+
+  const orderedUserIds: string[] = [];
+  const seenIds = new Set<string>();
+  for (const uid of rawCandidateIds) {
+    if (!uid || declinedIds.has(uid) || seenIds.has(uid)) continue;
+    seenIds.add(uid);
+    orderedUserIds.push(uid);
+  }
+
+  const allUserIdsToFetch = Array.from(new Set([...orderedUserIds, ...Array.from(existingMap.keys())]));
+  const fetchedUsers =
+    allUserIdsToFetch.length > 0
+      ? await UserModel.find({
+          $or: [{ _id: { $in: allUserIdsToFetch } }, { id: { $in: allUserIdsToFetch } }],
+        }).lean()
+      : [];
+  const userById = buildUserMap(fetchedUsers as any[]);
+
+  const { targetDate, startTime, endTime } = resolveEventDateAndTimes(eventObj);
+  const isOnline = eventObj?.type !== 'in_person';
+  let sharedMeetLink =
+    isOnline && eventObj?.meetLink && !isPlaceholderMeetLink(eventObj.meetLink)
+      ? String(eventObj.meetLink)
+      : '';
+
+  let attachedExternalEmails = false;
+
+  for (const uid of orderedUserIds) {
+    const userDoc = userById.get(uid);
+    const override = overrideTokensByUserId[uid] || {};
+    const refreshToken = override.refreshToken || userDoc?.googleRefreshToken;
+    const accessToken = override.accessToken || userDoc?.googleAccessToken;
+
+    if (userDoc?.googleCalendarConnected === false && !override.refreshToken && !override.accessToken) {
+      continue;
+    }
+    if (!refreshToken && !accessToken) {
+      continue;
+    }
+
+    const existingGoogleEventId = existingMap.get(uid);
+    if (existingGoogleEventId) {
+      try {
+        const updRes = await updateGoogleCalendarEvent({ refreshToken, accessToken }, existingGoogleEventId, {
+          title: eventObj.title,
+          description: eventObj.description,
+          date: targetDate,
+          startTime,
+          endTime,
+          isOnline,
+          location: eventObj.location,
+          meetLink: sharedMeetLink || undefined,
+          sendUpdates: 'none',
+        });
+
+        if (updRes.success) {
+          continue;
+        }
+        if (!updRes.error || !/(404|410|not found)/i.test(updRes.error)) {
+          console.warn(`[Google Calendar] Warning aggiornamento utente ${uid} (${existingGoogleEventId}):`, updRes.error);
+          continue;
+        }
+      } catch (updErr: any) {
+        console.warn(`[Google Calendar] Errore aggiornamento utente ${uid}:`, updErr?.message || updErr);
+        continue;
+      }
+    }
+
+    const shouldAttachExternalAttendees =
+      !attachedExternalEmails &&
+      externalOnlyEmails.length > 0 &&
+      (uid === String(eventObj?.creatorId) || orderedUserIds.indexOf(uid) === 0);
+
+    const attendeeEmails = shouldAttachExternalAttendees ? externalOnlyEmails : [];
+
+    try {
+      const calRes = await createGoogleCalendarEvent({
+        accessToken,
+        refreshToken,
+        title: eventObj.title,
+        description: eventObj.description,
+        date: targetDate,
+        startTime,
+        endTime,
+        isOnline,
+        location: eventObj.location,
+        meetLink: sharedMeetLink || undefined,
+        skipConferenceCreation: Boolean(sharedMeetLink),
+        sendUpdates: attendeeEmails.length > 0 ? 'externalOnly' : 'none',
+        attendeeEmails,
+      });
+
+      if (calRes.success && calRes.eventId) {
+        existingMap.set(uid, calRes.eventId);
+        if (attendeeEmails.length > 0) {
+          attachedExternalEmails = true;
+        }
+        if (isOnline && !sharedMeetLink && calRes.meetLink) {
+          sharedMeetLink = calRes.meetLink;
+        }
+      } else {
+        console.warn(`[Google Calendar] Inserimento non riuscito per utente ${uid}:`, calRes.error);
+      }
+    } catch (calErr: any) {
+      console.warn(`[Google Calendar] Errore inserimento per utente ${uid}:`, calErr?.message || calErr);
+    }
+  }
+
+  for (const [uid, gEventId] of Array.from(existingMap.entries())) {
+    if (!seenIds.has(uid)) {
+      const userDoc = userById.get(uid);
+      const override = overrideTokensByUserId[uid] || {};
+      const refreshToken = override.refreshToken || userDoc?.googleRefreshToken;
+      const accessToken = override.accessToken || userDoc?.googleAccessToken;
+      if (refreshToken || accessToken) {
+        try {
+          await deleteGoogleCalendarEvent({ refreshToken, accessToken }, gEventId);
+        } catch (delErr: any) {
+          console.warn(`[Google Calendar] Warning rimozione utente rimosso/rifiutato ${uid}:`, delErr?.message || delErr);
+        }
+      }
+      existingMap.delete(uid);
+    }
+  }
+
+  const googleCalendarEvents = Array.from(existingMap.entries()).map(([userId, googleEventId]) => ({
+    userId,
+    googleEventId,
+  }));
+
+  const primaryGoogleEventId =
+    (eventObj?.creatorId ? existingMap.get(String(eventObj.creatorId)) : undefined) ||
+    googleCalendarEvents[0]?.googleEventId ||
+    legacyCreatorEventId ||
+    null;
+
+  return {
+    meetLink: sharedMeetLink || undefined,
+    primaryGoogleEventId,
+    googleCalendarEvents,
+  };
+};
+
+const deleteEventAcrossUserCalendars = async (
+  eventToDelete: any,
+  overrideTokensByUserId: Record<string, CalendarTokenOverride> = {}
+) => {
+  const mapByUser = new Map<string, string>();
+  if (Array.isArray(eventToDelete?.googleCalendarEvents)) {
+    for (const entry of eventToDelete.googleCalendarEvents) {
+      if (entry?.userId && entry?.googleEventId) {
+        mapByUser.set(String(entry.userId), String(entry.googleEventId));
+      }
+    }
+  }
+  const legacyEventId = eventToDelete?.googleEventId || eventToDelete?.googleCalendarEventId;
+  if (eventToDelete?.creatorId && legacyEventId && !mapByUser.has(String(eventToDelete.creatorId))) {
+    mapByUser.set(String(eventToDelete.creatorId), String(legacyEventId));
+  }
+
+  const userIds = Array.from(mapByUser.keys());
+  if (userIds.length === 0) return;
+
+  const fetchedUsers = await UserModel.find({
+    $or: [{ _id: { $in: userIds } }, { id: { $in: userIds } }],
+  }).lean();
+  const userById = buildUserMap(fetchedUsers as any[]);
+
+  for (const [uid, gEventId] of mapByUser.entries()) {
+    const userDoc = userById.get(uid);
+    const override = overrideTokensByUserId[uid] || {};
+    const refreshToken = override.refreshToken || userDoc?.googleRefreshToken;
+    const accessToken = override.accessToken || userDoc?.googleAccessToken;
+    if (!refreshToken && !accessToken) continue;
+
+    try {
+      await deleteGoogleCalendarEvent({ refreshToken, accessToken }, gEventId);
+      console.log(`[Google Calendar] Evento ${gEventId} rimosso con successo dal calendario dell'utente ${uid}.`);
+    } catch (delErr: any) {
+      console.warn(`[Google Calendar] Errore eliminazione evento ${gEventId} per utente ${uid}:`, delErr?.message || delErr);
+    }
+  }
+};
+
 // POST /api/events - Creazione evento (sondaggio When2meet o evento ufficiale)
 app.post('/api/events', async (req: Request, res: Response) => {
   const eventData = req.body;
@@ -2688,66 +2977,35 @@ app.post('/api/events', async (req: Request, res: Response) => {
 
   const generatedId = eventData.id || `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
-  // AUTOMAZIONE SILENTE GOOGLE CALENDAR & MEET LATO BACKEND (Avvolta in try...catch protetto)
+  // AUTOMAZIONE DIRETTA GOOGLE CALENDAR & MEET PER CREATORE E TUTTI GLI INVITATI
   if (eventData.eventType === 'official' || eventData.status === 'confirmed' || eventData.finalizedSlot) {
     try {
-      const creator = await UserModel.findOne({ $or: [{ _id: eventData.creatorId }, { id: eventData.creatorId }] });
-      const userToken =
-        req.headers.authorization?.replace('Bearer ', '') ||
-        eventData.googleAccessToken ||
-        creator?.googleAccessToken;
-      const refreshToken = creator?.googleRefreshToken || eventData.googleRefreshToken;
+      const reqAccessToken = req.headers.authorization?.replace('Bearer ', '') || eventData.googleAccessToken;
+      const calSync = await syncConfirmedEventAcrossUserCalendars(eventData, {
+        [String(eventData.creatorId)]: {
+          accessToken: reqAccessToken,
+          refreshToken: eventData.googleRefreshToken,
+        },
+      });
 
-      // Se l'utente che crea l'evento non ha un refresh_token/access_token nel database (es. login mock)
-      if (!refreshToken && !userToken) {
-        console.warn("Token Google assente, evento non inserito in Calendar");
-      } else {
-        try {
-          // Raccogli email degli invitati
-          const inviteeIds = (eventData.invitees || []).map((i: any) => i.userId);
-          const inviteeUsers = await UserModel.find({
-            $or: [{ _id: { $in: inviteeIds } }, { id: { $in: inviteeIds } }],
-          });
-          const attendeeEmails = [
-            ...inviteeUsers.map((u) => u.email),
-            ...(eventData.externalInviteEmails || []),
-          ].filter(Boolean);
-
-          const targetDate =
-            eventData.finalizedSlot?.date ||
-            (eventData.dates && eventData.dates[0]) ||
-            new Date().toISOString().split('T')[0];
-          const targetStartTime =
-            eventData.finalizedSlot?.startTime || `${String(eventData.startHour || 9).padStart(2, '0')}:00`;
-          const targetEndTime =
-            eventData.finalizedSlot?.endTime || `${String(eventData.endHour || 10).padStart(2, '0')}:00`;
-
-          const calRes = await createGoogleCalendarEvent({
-            accessToken: userToken,
-            refreshToken,
-            title: eventData.title,
-            description: eventData.description,
-            date: targetDate,
-            startTime: targetStartTime,
-            endTime: targetEndTime,
-            isOnline: eventData.type !== 'in_person',
-            location: eventData.location,
-            attendeeEmails,
-          });
-
-          if (calRes?.meetLink) {
-            eventData.meetLink = calRes.meetLink;
-          }
-          if (calRes?.eventId) {
-            eventData.googleEventId = calRes.eventId;
-            eventData.googleCalendarEventId = calRes.eventId;
-          }
-        } catch (calErr: any) {
-          console.warn("Token Google assente, evento non inserito in Calendar", calErr?.message || calErr);
+      if (calSync.meetLink) {
+        eventData.meetLink = calSync.meetLink;
+      }
+      if (calSync.primaryGoogleEventId) {
+        eventData.googleEventId = calSync.primaryGoogleEventId;
+        eventData.googleCalendarEventId = calSync.primaryGoogleEventId;
+      }
+      if (calSync.googleCalendarEvents.length > 0) {
+        eventData.googleCalendarEvents = calSync.googleCalendarEvents;
+        const syncedSet = new Set(calSync.googleCalendarEvents.map((e) => e.userId));
+        if (Array.isArray(eventData.participants)) {
+          eventData.participants = eventData.participants.map((p: any) =>
+            syncedSet.has(String(p.userId)) ? { ...p, googleCalendarSynced: true } : p
+          );
         }
       }
     } catch (gcalErr: any) {
-      console.warn("Token Google assente, evento non inserito in Calendar", gcalErr?.message || gcalErr);
+      console.warn("Errore sincronizzazione diretta Google Calendar:", gcalErr?.message || gcalErr);
     }
   }
 
@@ -2808,45 +3066,29 @@ app.post('/api/polls', async (req: Request, res: Response) => {
 
   const generatedId = pollData.id || `poll-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
-  // AUTOMAZIONE SILENTE GOOGLE CALENDAR & MEET LATO BACKEND (Avvolta in try...catch protetto)
+  // AUTOMAZIONE DIRETTA GOOGLE CALENDAR & MEET PER CREATORE E TUTTI GLI INVITATI
   if (pollData.status === 'confirmed' || pollData.finalizedSlot) {
     try {
-      const creator = await UserModel.findOne({ $or: [{ _id: pollData.creatorId }, { id: pollData.creatorId }] });
-      const userToken =
-        req.headers.authorization?.replace('Bearer ', '') ||
-        pollData.googleAccessToken ||
-        creator?.googleAccessToken;
-      const refreshToken = creator?.googleRefreshToken || pollData.googleRefreshToken;
+      const reqAccessToken = req.headers.authorization?.replace('Bearer ', '') || pollData.googleAccessToken;
+      const calSync = await syncConfirmedEventAcrossUserCalendars(pollData, {
+        [String(pollData.creatorId)]: {
+          accessToken: reqAccessToken,
+          refreshToken: pollData.googleRefreshToken,
+        },
+      });
 
-      if (!refreshToken && !userToken) {
-        console.warn("Token Google assente, evento non inserito in Calendar");
-      } else {
-        try {
-          const calRes = await createGoogleCalendarEvent({
-            accessToken: userToken,
-            refreshToken,
-            title: pollData.title,
-            description: pollData.description,
-            date: pollData.finalizedSlot?.date || (pollData.dates && pollData.dates[0]) || new Date().toISOString().split('T')[0],
-            startTime: pollData.finalizedSlot?.startTime || `${String(pollData.startHour || 9).padStart(2, '0')}:00`,
-            endTime: pollData.finalizedSlot?.endTime || `${String(pollData.endHour || 10).padStart(2, '0')}:00`,
-            isOnline: pollData.type !== 'in_person',
-            location: pollData.location,
-          });
-
-          if (calRes?.meetLink) {
-            pollData.meetLink = calRes.meetLink;
-          }
-          if (calRes?.eventId) {
-            pollData.googleEventId = calRes.eventId;
-            pollData.googleCalendarEventId = calRes.eventId;
-          }
-        } catch (calErr: any) {
-          console.warn("Token Google assente, evento non inserito in Calendar", calErr?.message || calErr);
-        }
+      if (calSync.meetLink) {
+        pollData.meetLink = calSync.meetLink;
+      }
+      if (calSync.primaryGoogleEventId) {
+        pollData.googleEventId = calSync.primaryGoogleEventId;
+        pollData.googleCalendarEventId = calSync.primaryGoogleEventId;
+      }
+      if (calSync.googleCalendarEvents.length > 0) {
+        pollData.googleCalendarEvents = calSync.googleCalendarEvents;
       }
     } catch (gcalErr: any) {
-      console.warn("Token Google assente, evento non inserito in Calendar", gcalErr?.message || gcalErr);
+      console.warn("Errore sincronizzazione diretta Google Calendar per poll:", gcalErr?.message || gcalErr);
     }
   }
 
@@ -2906,91 +3148,87 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   const updates = req.body;
 
   try {
-    let justCreatedGoogleEvent = false;
-    // AUTOMAZIONE SILENTE GOOGLE CALENDAR & MEET LATO BACKEND
-    // Nel momento esatto in cui un sondaggio viene finalizzato/confermato
-    if (updates.status === 'confirmed' && updates.finalizedSlot) {
+    const existingEvent = await EventModel.findOne({ $or: [{ _id: id }, { id }] });
+    if (!existingEvent) {
+      return res.status(404).json({ error: 'Evento non trovato nel database' });
+    }
+
+    const calendarTriggerKeys = [
+      'title',
+      'description',
+      'dates',
+      'startHour',
+      'endHour',
+      'finalizedSlot',
+      'finalDate',
+      'location',
+      'type',
+      'invitees',
+      'externalInviteEmails',
+      'status',
+      'meetLink',
+    ];
+    const hasCalendarRelevantUpdate = calendarTriggerKeys.some((k) => updates[k] !== undefined);
+    const isBeingConfirmedNow = updates.status === 'confirmed' && Boolean(updates.finalizedSlot);
+    const isAlreadyConfirmedOrOfficial =
+      existingEvent.status === 'confirmed' ||
+      existingEvent.eventType === 'official' ||
+      updates.status === 'confirmed';
+
+    if (isBeingConfirmedNow || (isAlreadyConfirmedOrOfficial && hasCalendarRelevantUpdate)) {
       try {
-        const existingEvent = await EventModel.findOne({ $or: [{ _id: id }, { id }] });
-        if (existingEvent) {
-          const existingGoogleEventId =
-            existingEvent.googleEventId || existingEvent.googleCalendarEventId || null;
+        const existingObj = existingEvent.toObject();
+        const mergedEventSnapshot = {
+          ...existingObj,
+          ...updates,
+          meetLink:
+            updates.meetLink && !isPlaceholderMeetLink(updates.meetLink)
+              ? updates.meetLink
+              : existingObj.meetLink,
+          googleCalendarEvents:
+            Array.isArray(updates.googleCalendarEvents)
+              ? updates.googleCalendarEvents
+              : existingObj.googleCalendarEvents,
+        };
 
-          const creator = await UserModel.findOne({
-            $or: [{ _id: existingEvent.creatorId }, { id: existingEvent.creatorId }],
-          });
-          const userToken =
-            req.headers.authorization?.replace('Bearer ', '') ||
-            updates.googleAccessToken ||
-            req.body?.googleAccessToken ||
-            creator?.googleAccessToken;
-          const refreshToken =
-            creator?.googleRefreshToken ||
-            updates.googleRefreshToken ||
-            req.body?.googleRefreshToken;
+        const requesterId = String(
+          req.body?.userId ||
+            updates.userId ||
+            (req.headers['x-user-id'] as string) ||
+            existingObj.creatorId
+        );
+        const reqAccessToken =
+          req.headers.authorization?.replace('Bearer ', '') ||
+          req.body?.googleAccessToken ||
+          updates.googleAccessToken;
+        const reqRefreshToken = req.body?.googleRefreshToken || updates.googleRefreshToken;
 
-          if (existingGoogleEventId) {
-            // L'EVENTO ESISTE GIÀ SU GOOGLE CALENDAR: Modifica l'evento esistente e NON crearne uno nuovo!
-            try {
-              await updateGoogleCalendarEvent(
-                { refreshToken, accessToken: userToken },
-                existingGoogleEventId,
-                {
-                  title: updates.title || existingEvent.title,
-                  description: updates.description || existingEvent.description,
-                  date: updates.finalizedSlot.date,
-                  startTime: updates.finalizedSlot.startTime,
-                  endTime: updates.finalizedSlot.endTime,
-                  isOnline: existingEvent.type !== 'in_person',
-                  location: existingEvent.location,
-                }
-              );
-              console.log(`[Google Calendar] Evento esistente ${existingGoogleEventId} aggiornato con successo a ${updates.finalizedSlot.date} ${updates.finalizedSlot.startTime}-${updates.finalizedSlot.endTime}`);
-            } catch (updErr: any) {
-              console.warn("Errore aggiornamento evento esistente su Google Calendar:", updErr?.message || updErr);
-            }
-          } else if (refreshToken || userToken) {
-            // L'evento non esiste ancora su Google Calendar: crealo per la prima volta
-            try {
-              const inviteeIds = (existingEvent.invitees || []).map((i: any) => i.userId);
-              const inviteeUsers = await UserModel.find({
-                $or: [{ _id: { $in: inviteeIds } }, { id: { $in: inviteeIds } }],
-              });
-              const attendeeEmails = [
-                ...inviteeUsers.map((u) => u.email),
-                ...(existingEvent.externalInviteEmails || []),
-              ].filter(Boolean);
+        const calSync = await syncConfirmedEventAcrossUserCalendars(mergedEventSnapshot, {
+          [requesterId]: {
+            accessToken: reqAccessToken,
+            refreshToken: reqRefreshToken,
+          },
+        });
 
-              const calRes = await createGoogleCalendarEvent({
-                accessToken: userToken,
-                refreshToken,
-                title: updates.title || existingEvent.title,
-                description: updates.description || existingEvent.description,
-                date: updates.finalizedSlot.date,
-                startTime: updates.finalizedSlot.startTime,
-                endTime: updates.finalizedSlot.endTime,
-                isOnline: existingEvent.type !== 'in_person',
-                location: existingEvent.location,
-                attendeeEmails,
-              });
-
-              if (calRes?.meetLink) {
-                updates.meetLink = calRes.meetLink;
-              }
-              if (calRes?.eventId) {
-                updates.googleEventId = calRes.eventId;
-                updates.googleCalendarEventId = calRes.eventId;
-                justCreatedGoogleEvent = true;
-              }
-            } catch (calErr: any) {
-              console.warn("Token Google assente, evento non inserito in Calendar", calErr?.message || calErr);
-            }
-          } else {
-            console.warn("Token Google assente, evento non inserito in Calendar");
-          }
+        updates.googleCalendarEvents = calSync.googleCalendarEvents;
+        if (calSync.primaryGoogleEventId) {
+          updates.googleEventId = calSync.primaryGoogleEventId;
+          updates.googleCalendarEventId = calSync.primaryGoogleEventId;
+        }
+        if (calSync.meetLink) {
+          updates.meetLink = calSync.meetLink;
+        }
+        const syncedSet = new Set(calSync.googleCalendarEvents.map((e) => e.userId));
+        const baseParticipants = Array.isArray(updates.participants)
+          ? updates.participants
+          : existingObj.participants;
+        if (Array.isArray(baseParticipants) && baseParticipants.length > 0) {
+          updates.participants = baseParticipants.map((p: any) =>
+            syncedSet.has(String(p.userId)) ? { ...p, googleCalendarSynced: true } : p
+          );
         }
       } catch (gcalErr: any) {
-        console.warn("Token Google assente, evento non inserito in Calendar", gcalErr?.message || gcalErr);
+        console.warn("Google Calendar patch multi-user sync warning:", gcalErr?.message || gcalErr);
       }
     }
 
@@ -3001,61 +3239,6 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     );
     if (!updated) {
       return res.status(404).json({ error: 'Evento non trovato nel database' });
-    }
-
-    // SINCRONIZZAZIONE MODIFICA GOOGLE CALENDAR
-    // Verifica se l'utente loggato ha un token Google e se l'evento ha un googleEventId (evitando doppio patch se appena creato)
-    const targetGoogleEventId = updated.googleEventId || updated.googleCalendarEventId;
-    if (targetGoogleEventId && !justCreatedGoogleEvent) {
-      try {
-        const requesterId =
-          req.body?.userId ||
-          updates.userId ||
-          (req.headers['x-user-id'] as string) ||
-          updated.creatorId;
-
-        const loggedInUser = await UserModel.findOne({
-          $or: [{ _id: requesterId }, { id: requesterId }],
-        });
-
-        const refreshToken =
-          req.body?.googleRefreshToken ||
-          updates.googleRefreshToken ||
-          loggedInUser?.googleRefreshToken;
-
-        const accessToken =
-          req.headers.authorization?.replace('Bearer ', '') ||
-          req.body?.googleAccessToken ||
-          updates.googleAccessToken ||
-          loggedInUser?.googleAccessToken;
-
-        if (refreshToken || accessToken) {
-          const eventDate =
-            updated.finalizedSlot?.date ||
-            (updated.dates && updated.dates[0]) ||
-            updates.date;
-          const startTime =
-            updated.finalizedSlot?.startTime ||
-            (updated.startHour ? `${String(updated.startHour).padStart(2, '0')}:00` : '09:00');
-          const endTime =
-            updated.finalizedSlot?.endTime ||
-            (updated.endHour ? `${String(updated.endHour).padStart(2, '0')}:00` : '10:00');
-
-          await updateGoogleCalendarEvent({ refreshToken, accessToken }, targetGoogleEventId, {
-            title: updated.title,
-            description: updated.description,
-            date: eventDate,
-            startTime,
-            endTime,
-            isOnline: updated.type !== 'in_person',
-            location: updated.location,
-          });
-        } else {
-          console.warn("Token Google assente, evento non aggiornato su Calendar");
-        }
-      } catch (calUpdErr: any) {
-        console.warn("Google Calendar patch sync warning:", calUpdErr?.message || calUpdErr);
-      }
     }
 
     const mappedUpdated = { ...updated.toObject(), id: updated._id || updated.id };
@@ -3087,7 +3270,7 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/events/:id & /api/polls/:id - Eliminazione reale da Google Calendar e MongoDB
+// DELETE /api/events/:id & /api/polls/:id - Eliminazione reale da Google Calendar (per tutti i partecipanti) e MongoDB
 const handleDeleteEventOrPoll = async (req: Request, res: Response) => {
   const { id } = req.params;
 
@@ -3105,45 +3288,25 @@ const handleDeleteEventOrPoll = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Evento/Sondaggio non trovato nel database' });
     }
 
-    // 2. Se il documento possiede un googleEventId e l'utente loggato ha un googleRefreshToken
-    const targetGoogleEventId = eventToDelete.googleEventId || eventToDelete.googleCalendarEventId;
-    if (targetGoogleEventId) {
-      try {
-        const requesterId =
-          req.body?.userId ||
+    // 2. Rimuovi l'evento da Google Calendar per ogni partecipante/invitato sincronizzato
+    try {
+      const requesterId = String(
+        req.body?.userId ||
           (req.query?.userId as string) ||
           (req.headers['x-user-id'] as string) ||
-          eventToDelete.creatorId;
-
-        let user: any = null;
-        if (requesterId) {
-          try {
-            user = await UserModel.findById(requesterId);
-          } catch {}
-          if (!user) {
-            user = await UserModel.findOne({ $or: [{ _id: requesterId }, { id: requesterId }] });
-          }
-        }
-
-        const refreshToken =
-          req.body?.googleRefreshToken ||
-          (req.query?.googleRefreshToken as string) ||
-          user?.googleRefreshToken;
-
-        const accessToken =
-          req.headers.authorization?.replace('Bearer ', '') ||
-          req.body?.googleAccessToken ||
-          user?.googleAccessToken;
-
-        if (refreshToken || accessToken) {
-          await deleteGoogleCalendarEvent({ refreshToken, accessToken }, targetGoogleEventId);
-          console.log(`[Google Calendar] Evento ${targetGoogleEventId} rimosso con successo.`);
-        } else {
-          console.warn("Token Google assente, evento non cancellato da Calendar");
-        }
-      } catch (delCalErr: any) {
-        console.warn("Errore eliminazione da Google Calendar (procedo con DB):", delCalErr?.message || delCalErr);
+          eventToDelete.creatorId ||
+          ''
+      );
+      const overrideTokens: Record<string, CalendarTokenOverride> = {};
+      if (requesterId) {
+        overrideTokens[requesterId] = {
+          accessToken: req.headers.authorization?.replace('Bearer ', '') || req.body?.googleAccessToken,
+          refreshToken: req.body?.googleRefreshToken || (req.query?.googleRefreshToken as string),
+        };
       }
+      await deleteEventAcrossUserCalendars(eventToDelete.toObject ? eventToDelete.toObject() : eventToDelete, overrideTokens);
+    } catch (delCalErr: any) {
+      console.warn("Errore eliminazione da Google Calendar (procedo con DB):", delCalErr?.message || delCalErr);
     }
 
     // 3. Solo DOPO aver avvisato Google, esegui l'eliminazione da MongoDB
@@ -3171,7 +3334,7 @@ app.post('/api/events/:id/delete', handleDeleteEventOrPoll);
 app.delete('/api/polls/:id', handleDeleteEventOrPoll);
 app.post('/api/polls/:id/delete', handleDeleteEventOrPoll);
 
-// PATCH /api/polls/:id/confirmed-date - Modifica data/ora di un sondaggio confermato con allineamento Google Calendar
+// PATCH /api/polls/:id/confirmed-date - Modifica data/ora di un sondaggio confermato con allineamento Google Calendar per tutti gli invitati
 const handleUpdatePollConfirmedDate = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { date, finalDate, startTime, endTime } = req.body;
@@ -3206,22 +3369,54 @@ const handleUpdatePollConfirmedDate = async (req: Request, res: Response) => {
       endTime: targetEndTime,
     };
 
-    const targetGoogleEventId = existingPoll.googleEventId || existingPoll.googleCalendarEventId || null;
+    const existingObj = existingPoll.toObject ? existingPoll.toObject() : existingPoll;
+    const requesterId = String(
+      req.body?.userId ||
+        (req.headers['x-user-id'] as string) ||
+        existingObj.creatorId ||
+        ''
+    );
 
-    // 1. Aggiorna il documento PollModel nel database
+    const calSync = await syncConfirmedEventAcrossUserCalendars(
+      {
+        ...existingObj,
+        finalDate: finalDateObj,
+        finalizedSlot: finalDateObj,
+        dates: [targetDate],
+        startHour: startH,
+        endHour: endH,
+        status: 'confirmed',
+      },
+      requesterId
+        ? {
+            [requesterId]: {
+              accessToken: req.body?.googleAccessToken || req.headers.authorization?.replace('Bearer ', ''),
+              refreshToken: req.body?.googleRefreshToken,
+            },
+          }
+        : {}
+    );
+
+    const updateSet: Record<string, any> = {
+      finalDate: finalDateObj,
+      dates: [targetDate],
+      startHour: startH,
+      endHour: endH,
+      finalizedSlot: finalDateObj,
+      status: 'confirmed',
+      googleCalendarEvents: calSync.googleCalendarEvents,
+    };
+    if (calSync.primaryGoogleEventId) {
+      updateSet.googleEventId = calSync.primaryGoogleEventId;
+      updateSet.googleCalendarEventId = calSync.primaryGoogleEventId;
+    }
+    if (calSync.meetLink) {
+      updateSet.meetLink = calSync.meetLink;
+    }
+
     const updatedPoll = await PollModel.findOneAndUpdate(
       { $or: [{ _id: id }, { id }] },
-      {
-        $set: {
-          finalDate: finalDateObj,
-          dates: [targetDate],
-          startHour: startH,
-          endHour: endH,
-          finalizedSlot: finalDateObj,
-          status: 'confirmed',
-          ...(targetGoogleEventId ? { googleEventId: targetGoogleEventId, googleCalendarEventId: targetGoogleEventId } : {}),
-        },
-      },
+      { $set: updateSet },
       { new: true }
     );
 
@@ -3229,140 +3424,16 @@ const handleUpdatePollConfirmedDate = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Errore aggiornamento sondaggio su MongoDB' });
     }
 
-    const poll: any = updatedPoll;
-    if (targetGoogleEventId && !poll.googleEventId) {
-      poll.googleEventId = targetGoogleEventId;
-    }
-
-    // 2. Controlla se l'utente loggato o il creatore ha un googleRefreshToken e se il sondaggio aggiornato possiede un googleEventId
-    const requesterId =
-      req.body?.userId ||
-      (req.headers['x-user-id'] as string) ||
-      poll.creatorId;
-
-    let user: any = null;
-    if (requesterId) {
-      try {
-        user = await UserModel.findById(requesterId);
-      } catch {}
-      if (!user) {
-        user = await UserModel.findOne({ $or: [{ _id: requesterId }, { id: requesterId }] });
-      }
-    }
-
-    if (!user) {
-      user = { id: requesterId, googleRefreshToken: req.body?.googleRefreshToken };
-    } else if (!user.googleRefreshToken && req.body?.googleRefreshToken) {
-      user.googleRefreshToken = req.body.googleRefreshToken;
-    }
-
-    let creatorUser: any = null;
-    if (poll.creatorId && poll.creatorId !== requesterId) {
-      try {
-        creatorUser = await UserModel.findById(poll.creatorId);
-      } catch {}
-      if (!creatorUser) {
-        creatorUser = await UserModel.findOne({ $or: [{ _id: poll.creatorId }, { id: poll.creatorId }] });
-      }
-    }
-
-    const refreshToken =
-      req.body?.googleRefreshToken ||
-      user?.googleRefreshToken ||
-      creatorUser?.googleRefreshToken;
-
-    const accessToken =
-      req.body?.googleAccessToken ||
-      req.headers.authorization?.replace('Bearer ', '') ||
-      user?.googleAccessToken ||
-      creatorUser?.googleAccessToken;
-
-    const googleAuth = { refreshToken, accessToken };
-
-    // 3. Sincronizzazione con Google Calendar:
-    // Se possiede già un googleEventId, MODIFICA l'evento esistente e NON crearne uno nuovo!
-    const effectiveGoogleEventId =
-      poll.googleEventId ||
-      poll.googleCalendarEventId ||
-      existingPoll.googleEventId ||
-      existingPoll.googleCalendarEventId ||
-      targetGoogleEventId;
-
-    if (effectiveGoogleEventId) {
-      if (googleAuth.refreshToken || googleAuth.accessToken) {
-        try {
-          const finalDateData =
-            typeof poll.finalDate === 'object' && poll.finalDate !== null
-              ? poll.finalDate
-              : finalDateObj;
-
-          const calRes = await updateGoogleCalendarEvent(googleAuth, effectiveGoogleEventId, {
-            title: poll.title,
-            description: poll.description,
-            date: finalDateData.date,
-            startTime: finalDateData.startTime,
-            endTime: finalDateData.endTime,
-            isOnline: poll.type !== 'in_person',
-            location: poll.location,
-          });
-
-          if (calRes.success) {
-            console.log(`[Google Calendar] Evento ${effectiveGoogleEventId} aggiornato con successo a ${finalDateData.date} ${finalDateData.startTime}-${finalDateData.endTime}`);
-          } else {
-            console.warn(`[Google Calendar] Warning aggiornamento evento ${effectiveGoogleEventId}:`, calRes.error);
-          }
-        } catch (calErr: any) {
-          console.warn("Errore allineamento Google Calendar per sondaggio confermato:", calErr?.message || calErr);
-        }
-      } else {
-        console.warn("Token Google assente per l'utente/creatore, Google Calendar non aggiornato");
-      }
-    } else if (googleAuth.refreshToken || googleAuth.accessToken) {
-      // Se non aveva ancora un googleEventId, crealo per la prima volta
-      try {
-        const calRes = await createGoogleCalendarEvent({
-          accessToken: googleAuth.accessToken,
-          refreshToken: googleAuth.refreshToken,
-          title: poll.title,
-          description: poll.description,
-          date: finalDateObj.date,
-          startTime: finalDateObj.startTime,
-          endTime: finalDateObj.endTime,
-          isOnline: poll.type !== 'in_person',
-          location: poll.location,
-        });
-
-        if (calRes?.eventId) {
-          poll.googleEventId = calRes.eventId;
-          poll.googleCalendarEventId = calRes.eventId;
-          if (calRes.meetLink) poll.meetLink = calRes.meetLink;
-          await PollModel.updateOne(
-            { $or: [{ _id: id }, { id }] },
-            {
-              $set: {
-                googleEventId: calRes.eventId,
-                googleCalendarEventId: calRes.eventId,
-                ...(calRes.meetLink ? { meetLink: calRes.meetLink } : {}),
-              },
-            }
-          );
-        }
-      } catch (createErr: any) {
-        console.warn("Errore creazione iniziale evento Calendar:", createErr?.message || createErr);
-      }
-    }
-
-    const pollObj = typeof poll.toObject === 'function' ? poll.toObject() : poll;
+    const pollObj = typeof updatedPoll.toObject === 'function' ? updatedPoll.toObject() : updatedPoll;
     const mapped = {
       ...pollObj,
-      id: poll._id || poll.id,
+      id: updatedPoll._id || updatedPoll.id,
       finalDate: finalDateObj,
       finalizedSlot: finalDateObj,
       dates: [targetDate],
       startHour: startH,
       endHour: endH,
       status: 'confirmed',
-      ...(effectiveGoogleEventId ? { googleEventId: effectiveGoogleEventId, googleCalendarEventId: effectiveGoogleEventId } : {}),
     };
 
     broadcastRealtimeEvent('event:updated', { event: mapped });
@@ -3387,7 +3458,7 @@ const handleUpdatePollConfirmedDate = async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      message: 'Data e ora confermate aggiornate con successo e sincronizzate su Google Calendar',
+      message: 'Data e ora confermate aggiornate con successo e sincronizzate su Google Calendar per tutti gli invitati',
       poll: mapped,
       event: mapped,
     });
@@ -3400,10 +3471,10 @@ const handleUpdatePollConfirmedDate = async (req: Request, res: Response) => {
 app.patch('/api/polls/:id/confirmed-date', handleUpdatePollConfirmedDate);
 app.patch('/api/events/:id/confirmed-date', handleUpdatePollConfirmedDate);
 
-// POST /api/events/:id/participate - Partecipazione evento ufficiale & Google Calendar
+// POST /api/events/:id/participate - Partecipazione evento ufficiale & inserimento diretto Google Calendar
 app.post('/api/events/:id/participate', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { userId } = req.body;
+  const { userId, googleAccessToken, googleRefreshToken } = req.body;
 
   try {
     const event = await EventModel.findOne({ $or: [{ _id: id }, { id }] });
@@ -3416,27 +3487,85 @@ app.post('/api/events/:id/participate', async (req: Request, res: Response) => {
     if (partIdx >= 0) {
       event.participants[partIdx].status = 'accepted';
       event.participants[partIdx].respondedAt = new Date().toISOString();
-      event.participants[partIdx].googleCalendarSynced = true;
     } else {
       event.participants.push({
         userId,
         status: 'accepted',
         respondedAt: new Date().toISOString(),
-        googleCalendarSynced: true,
+        googleCalendarSynced: false,
       });
     }
+
+    const updatedPartIdx = event.participants.findIndex((p) => p.userId === userId);
+    const existingEntries = Array.isArray(event.googleCalendarEvents) ? [...event.googleCalendarEvents] : [];
+    const alreadyHasEntry =
+      existingEntries.some((entry) => entry.userId === userId) ||
+      (event.creatorId === userId && Boolean(event.googleEventId || event.googleCalendarEventId));
+
+    if (alreadyHasEntry) {
+      if (updatedPartIdx >= 0) {
+        event.participants[updatedPartIdx].googleCalendarSynced = true;
+      }
+    } else if (event.status === 'confirmed' || event.eventType === 'official' || event.finalizedSlot) {
+      try {
+        const userDoc = await UserModel.findOne({ $or: [{ _id: userId }, { id: userId }] }).lean();
+        const refreshToken = googleRefreshToken || (userDoc as any)?.googleRefreshToken;
+        const accessToken =
+          req.headers.authorization?.replace('Bearer ', '') ||
+          googleAccessToken ||
+          (userDoc as any)?.googleAccessToken;
+
+        if ((userDoc as any)?.googleCalendarConnected !== false && (refreshToken || accessToken)) {
+          const { targetDate, startTime, endTime } = resolveEventDateAndTimes(event);
+          const isOnline = event.type !== 'in_person';
+          const existingMeetLink =
+            isOnline && event.meetLink && !isPlaceholderMeetLink(event.meetLink) ? event.meetLink : undefined;
+
+          const calRes = await createGoogleCalendarEvent({
+            accessToken,
+            refreshToken,
+            title: event.title,
+            description: event.description,
+            date: targetDate,
+            startTime,
+            endTime,
+            isOnline,
+            location: event.location,
+            meetLink: existingMeetLink,
+            skipConferenceCreation: Boolean(existingMeetLink),
+            sendUpdates: 'none',
+          });
+
+          if (calRes.success && calRes.eventId) {
+            existingEntries.push({ userId, googleEventId: calRes.eventId });
+            event.googleCalendarEvents = existingEntries as any;
+            if (!existingMeetLink && calRes.meetLink) {
+              event.meetLink = calRes.meetLink;
+            }
+            if (updatedPartIdx >= 0) {
+              event.participants[updatedPartIdx].googleCalendarSynced = true;
+            }
+          }
+        }
+      } catch (calErr: any) {
+        console.warn(`[Google Calendar] Errore sync partecipazione utente ${userId}:`, calErr?.message || calErr);
+      }
+    }
+
     await event.save();
-    return res.json({ success: true, event: { ...event.toObject(), id: event._id || event.id } });
+    const mapped = { ...event.toObject(), id: event._id || event.id };
+    broadcastRealtimeEvent('event:updated', { event: mapped });
+    return res.json({ success: true, event: mapped });
   } catch (err: any) {
     console.error('Errore participate EventModel MongoDB:', err.message);
     return res.status(500).json({ error: 'Errore salvataggio partecipazione in MongoDB' });
   }
 });
 
-// POST /api/events/:id/decline - Rifiuto partecipazione evento
+// POST /api/events/:id/decline - Rifiuto partecipazione evento & rimozione dal calendario dell'utente
 app.post('/api/events/:id/decline', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { userId } = req.body;
+  const { userId, googleAccessToken, googleRefreshToken } = req.body;
 
   try {
     const event = await EventModel.findOne({ $or: [{ _id: id }, { id }] });
@@ -3458,8 +3587,40 @@ app.post('/api/events/:id/decline', async (req: Request, res: Response) => {
         googleCalendarSynced: false,
       });
     }
+
+    const existingEntries = Array.isArray(event.googleCalendarEvents) ? [...event.googleCalendarEvents] : [];
+    const userCalEntry = existingEntries.find((entry) => entry.userId === userId);
+    const targetGoogleEventId =
+      userCalEntry?.googleEventId ||
+      (event.creatorId === userId ? event.googleEventId || event.googleCalendarEventId : undefined);
+
+    if (targetGoogleEventId) {
+      try {
+        const userDoc = await UserModel.findOne({ $or: [{ _id: userId }, { id: userId }] }).lean();
+        const refreshToken = googleRefreshToken || (userDoc as any)?.googleRefreshToken;
+        const accessToken =
+          req.headers.authorization?.replace('Bearer ', '') ||
+          googleAccessToken ||
+          (userDoc as any)?.googleAccessToken;
+
+        if (refreshToken || accessToken) {
+          await deleteGoogleCalendarEvent({ refreshToken, accessToken }, targetGoogleEventId);
+        }
+      } catch (delErr: any) {
+        console.warn(`[Google Calendar] Warning rimozione su decline utente ${userId}:`, delErr?.message || delErr);
+      }
+
+      event.googleCalendarEvents = existingEntries.filter((entry) => entry.userId !== userId) as any;
+      if (event.creatorId === userId) {
+        event.googleEventId = undefined;
+        event.googleCalendarEventId = undefined;
+      }
+    }
+
     await event.save();
-    return res.json({ success: true, event: { ...event.toObject(), id: event._id || event.id } });
+    const mapped = { ...event.toObject(), id: event._id || event.id };
+    broadcastRealtimeEvent('event:updated', { event: mapped });
+    return res.json({ success: true, event: mapped });
   } catch (err: any) {
     console.error('Errore decline EventModel MongoDB:', err.message);
     return res.status(500).json({ error: 'Errore salvataggio rifiuto in MongoDB' });
@@ -3639,7 +3800,16 @@ app.patch('/api/client-requests/:id', async (req: Request, res: Response) => {
 // POST /api/client-requests/:id/confirm-final - Chiusura e conferma call con cliente in MongoDB (Riservato ESCLUSIVAMENTE ad admin_clienti del gruppo)
 app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { finalizedDate, finalizedStartTime, finalizedEndTime, meetLink, userId } = req.body;
+  const {
+    finalizedDate,
+    finalizedStartTime,
+    finalizedEndTime,
+    meetLink,
+    userId,
+    eventId,
+    googleAccessToken,
+    googleRefreshToken,
+  } = req.body;
 
   try {
     const existing = await ClientRequestModel.findOne({ $or: [{ _id: id }, { id }] });
@@ -3658,18 +3828,103 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
       }
     }
 
-    const generatedMeet = meetLink || `https://meet.google.com/jes-${Math.random().toString(36).substring(2, 6)}-call`;
+    const finalSlot = {
+      date: finalizedDate,
+      startTime: finalizedStartTime,
+      endTime: finalizedEndTime,
+    };
+
+    let finalMeet = meetLink && !isPlaceholderMeetLink(meetLink) ? String(meetLink) : '';
+    let updatedLinkedEvent: any = null;
+
+    const targetEventId = eventId || existing.pollEventId;
+    const reqAccessToken = req.headers.authorization?.replace('Bearer ', '') || googleAccessToken;
+
+    if (targetEventId) {
+      const linkedEvent = await EventModel.findOne({ $or: [{ _id: targetEventId }, { id: targetEventId }] });
+      if (linkedEvent) {
+        const linkedObj = linkedEvent.toObject ? linkedEvent.toObject() : linkedEvent;
+        const overrideTokens: Record<string, CalendarTokenOverride> = {};
+        if (userId) {
+          overrideTokens[String(userId)] = {
+            accessToken: reqAccessToken,
+            refreshToken: googleRefreshToken,
+          };
+        }
+
+        const calSync = await syncConfirmedEventAcrossUserCalendars(
+          {
+            ...linkedObj,
+            status: 'confirmed',
+            finalizedSlot: finalSlot,
+            finalDate: finalSlot,
+            meetLink: finalMeet || linkedObj.meetLink,
+            clientInfo: linkedObj.clientInfo || {
+              companyName: existing.companyName,
+              contactEmail: existing.contactEmail,
+            },
+          },
+          overrideTokens
+        );
+
+        if (calSync.meetLink) {
+          finalMeet = calSync.meetLink;
+        }
+
+        linkedEvent.status = 'confirmed';
+        linkedEvent.finalizedSlot = finalSlot;
+        linkedEvent.finalDate = finalSlot as any;
+        linkedEvent.googleCalendarEvents = calSync.googleCalendarEvents as any;
+        if (calSync.primaryGoogleEventId) {
+          linkedEvent.googleEventId = calSync.primaryGoogleEventId;
+          linkedEvent.googleCalendarEventId = calSync.primaryGoogleEventId;
+        }
+        if (finalMeet) {
+          linkedEvent.meetLink = finalMeet;
+        }
+
+        await linkedEvent.save();
+        updatedLinkedEvent = { ...linkedEvent.toObject(), id: linkedEvent._id || linkedEvent.id };
+        broadcastRealtimeEvent('event:updated', { event: updatedLinkedEvent });
+      }
+    } else if (userId && (reqAccessToken || googleRefreshToken || true)) {
+      try {
+        const adminUser = await UserModel.findOne({ $or: [{ _id: userId }, { id: userId }] }).lean();
+        const refreshToken = googleRefreshToken || (adminUser as any)?.googleRefreshToken;
+        const accessToken = reqAccessToken || (adminUser as any)?.googleAccessToken;
+        if (refreshToken || accessToken) {
+          const contactEmail = existing.contactEmail?.trim();
+          const calRes = await createGoogleCalendarEvent({
+            accessToken,
+            refreshToken,
+            title: `Call Cliente: ${existing.companyName}`,
+            description: existing.description,
+            date: finalizedDate,
+            startTime: finalizedStartTime,
+            endTime: finalizedEndTime,
+            isOnline: true,
+            sendUpdates: contactEmail ? 'externalOnly' : 'none',
+            attendeeEmails: contactEmail ? [contactEmail] : [],
+          });
+          if (calRes.success && calRes.meetLink) {
+            finalMeet = calRes.meetLink;
+          }
+        }
+      } catch (calErr: any) {
+        console.warn('[Google Calendar] Warning creazione call B2B diretta:', calErr?.message || calErr);
+      }
+    }
+
+    if (!finalMeet) {
+      finalMeet = `https://meet.google.com/jes-${Math.random().toString(36).substring(2, 6)}-call`;
+    }
 
     const updated = await ClientRequestModel.findOneAndUpdate(
       { $or: [{ _id: id }, { id }] },
       {
         status: 'confirmed',
-        finalizedSlot: {
-          date: finalizedDate,
-          startTime: finalizedStartTime,
-          endTime: finalizedEndTime,
-        },
-        meetLink: generatedMeet,
+        finalizedSlot: finalSlot,
+        meetLink: finalMeet,
         updatedAt: new Date(),
       },
       { new: true }
@@ -3679,7 +3934,13 @@ app.post('/api/client-requests/:id/confirm-final', async (req: Request, res: Res
       return res.status(404).json({ error: 'Richiesta non trovata nel database' });
     }
 
-    return res.json({ success: true, message: 'Richiesta confermata con successo in MongoDB', meetLink: generatedMeet });
+    return res.json({
+      success: true,
+      message: 'Richiesta confermata con successo in MongoDB e sincronizzata su Google Calendar',
+      meetLink: finalMeet,
+      request: { ...updated.toObject(), id: updated._id || updated.id },
+      ...(updatedLinkedEvent ? { event: updatedLinkedEvent } : {}),
+    });
   } catch (err: any) {
     console.error('Errore confirm-final ClientRequestModel MongoDB:', err.message);
     return res.status(500).json({ error: 'Errore conferma call cliente in MongoDB' });

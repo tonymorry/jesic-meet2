@@ -43,7 +43,6 @@ import { PrivacyPolicyView } from './components/PrivacyPolicyView';
 import { TermsOfServiceView } from './components/TermsOfServiceView';
 import { PushBanner } from './components/PushBanner';
 import { SetGooglePasswordModal } from './components/SetGooglePasswordModal';
-import { autoSyncMeetingEventToCalendar } from './utils/googleWorkspaceAuth';
 import { prefetchChat, prefetchAllUserGroupsChats } from './utils/chatCache';
 import { realtimeClient, useRealtimeSubscription } from './utils/realtime';
 
@@ -797,28 +796,20 @@ export default function App() {
             : e
         )
       );
-
-      const targetEvt = events.find((e) => e.id === eventId);
-      if (targetEvt && currentUser) {
-        const updatedEvt: MeetingEvent = {
-          ...targetEvt,
-          status: 'confirmed',
-          finalizedSlot: finalSlot,
-          meetLink: generatedMeet,
-        };
-        const attendeeUsers = users.filter((u) => targetEvt.invitees.some((inv) => inv.userId === u.id));
-        autoSyncMeetingEventToCalendar(updatedEvt, finalSlot, currentUser, attendeeUsers).catch((e) =>
-          console.log('[Auto Google Calendar Sync client call]', e)
-        );
-      }
     }
 
     try {
-      await fetch(`/api/client-requests/${request.id}/confirm-final`, {
+      const res = await fetch(`/api/client-requests/${request.id}/confirm-final`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(currentUser?.googleAccessToken ? { Authorization: `Bearer ${currentUser.googleAccessToken}` } : {}),
+        },
         body: JSON.stringify({
           eventId,
+          userId: currentUser?.id,
+          googleAccessToken: currentUser?.googleAccessToken,
+          googleRefreshToken: currentUser?.googleRefreshToken,
           finalizedDate: finalSlot.date,
           finalizedStartTime: finalSlot.startTime,
           finalizedEndTime: finalSlot.endTime,
@@ -826,8 +817,22 @@ export default function App() {
           organizerRole: currentUser?.role || 'Admin Clienti JESic',
           adminEmail: currentUser?.email,
         }),
-      }).catch((e) => console.log('[API confirmation sync]', e));
-    } catch {}
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.meetLink) {
+          setClientRequests((prev) =>
+            prev.map((r) => (r.id === request.id ? { ...r, meetLink: data.meetLink } : r))
+          );
+        }
+        if (data?.event && (eventId || data.event.id)) {
+          const targetId = eventId || data.event.id;
+          setEvents((prev) => prev.map((e) => (e.id === targetId ? { ...e, ...data.event } : e)));
+        }
+      }
+    } catch (e) {
+      console.log('[API confirmation sync]', e);
+    }
   };
 
   // GESTIONE REGISTRAZIONE / LOGIN SINCRONIZZATA CON MONGODB (Default sempre 'user')
@@ -1823,7 +1828,14 @@ export default function App() {
         googleRefreshToken: currentUser?.googleRefreshToken,
         googleAccessToken: currentUser?.googleAccessToken,
       }),
-    }).catch((e) => console.log('[API update official event sync]', e));
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.event) {
+          setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? { ...e, ...data.event } : e)));
+        }
+      })
+      .catch((e) => console.log('[API update official event sync]', e));
   };
 
   // SALVATAGGIO DISPONIBILITÀ (When2meet)
@@ -2056,20 +2068,28 @@ export default function App() {
       })
     );
 
-    const targetEvt = events.find((e) => e.id === eventId);
-    if (targetEvt && targetEvt.finalizedSlot) {
-      autoSyncMeetingEventToCalendar(targetEvt, targetEvt.finalizedSlot, currentUser, [currentUser]).catch((err) =>
-        console.log('[Google Calendar auto-sync participate]', err)
-      );
-    }
-
     try {
-      await fetch(`/api/events/${eventId}/participate`, {
+      const res = await fetch(`/api/events/${eventId}/participate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id }),
-      }).catch((e) => console.log('[API participate sync]', e));
-    } catch {}
+        headers: {
+          'Content-Type': 'application/json',
+          ...(currentUser.googleAccessToken ? { Authorization: `Bearer ${currentUser.googleAccessToken}` } : {}),
+        },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          googleAccessToken: currentUser.googleAccessToken,
+          googleRefreshToken: currentUser.googleRefreshToken,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.event) {
+          setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, ...data.event } : e)));
+        }
+      }
+    } catch (e) {
+      console.log('[API participate sync]', e);
+    }
   };
 
   // RIFIUTA EVENTO ASSOCIATIVO UFFICIALE
@@ -2109,12 +2129,27 @@ export default function App() {
     );
 
     try {
-      await fetch(`/api/events/${eventId}/decline`, {
+      const res = await fetch(`/api/events/${eventId}/decline`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id }),
-      }).catch((e) => console.log('[API decline sync]', e));
-    } catch {}
+        headers: {
+          'Content-Type': 'application/json',
+          ...(currentUser.googleAccessToken ? { Authorization: `Bearer ${currentUser.googleAccessToken}` } : {}),
+        },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          googleAccessToken: currentUser.googleAccessToken,
+          googleRefreshToken: currentUser.googleRefreshToken,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.event) {
+          setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, ...data.event } : e)));
+        }
+      }
+    } catch (e) {
+      console.log('[API decline sync]', e);
+    }
   };
 
   // SOLLECITI RISPOSTE

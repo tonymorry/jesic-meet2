@@ -63,6 +63,9 @@ export interface CreateGoogleCalendarEventParams {
   endTime: string; // "HH:mm"
   isOnline?: boolean;
   location?: string;
+  meetLink?: string;
+  skipConferenceCreation?: boolean;
+  sendUpdates?: 'all' | 'externalOnly' | 'none';
   attendeeEmails?: string[];
 }
 
@@ -126,6 +129,9 @@ export async function createGoogleCalendarEvent(
     endTime,
     isOnline = true,
     location,
+    meetLink,
+    skipConferenceCreation = false,
+    sendUpdates,
     attendeeEmails = [],
   } = params;
 
@@ -153,13 +159,13 @@ export async function createGoogleCalendarEvent(
 
     const descriptionParts = [
       description || '',
-      '',
+      isOnline && meetLink ? `🔗 Link Google Meet: ${meetLink}` : '',
       'Organizzato tramite JESic Meet (Junior Enterprise Sicilia)',
     ]
       .filter(Boolean)
-      .join('\n');
+      .join('\n\n');
 
-    const requestId = `jesic-${Date.now()}`;
+    const requestId = `jesic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
     const eventPayload: any = {
       summary: `[JESic] ${title}`,
@@ -172,7 +178,7 @@ export async function createGoogleCalendarEvent(
         dateTime: endDateTime,
         timeZone: 'Europe/Rome',
       },
-      location: isOnline ? 'Google Meet' : location || 'Sede JESic',
+      location: isOnline ? meetLink || 'Google Meet' : location || 'Sede JESic',
       reminders: {
         useDefault: false,
         overrides: [
@@ -186,8 +192,10 @@ export async function createGoogleCalendarEvent(
       eventPayload.attendees = attendeeEmails.map((email) => ({ email }));
     }
 
-    // Parametro obbligatorio per far generare a Google la stanza Meet reale
-    if (isOnline) {
+    const shouldCreateConference = isOnline && !skipConferenceCreation && !meetLink;
+
+    // Parametro obbligatorio per far generare a Google la stanza Meet reale (solo una volta per evento)
+    if (shouldCreateConference) {
       eventPayload.conferenceData = {
         createRequest: {
           requestId,
@@ -196,17 +204,21 @@ export async function createGoogleCalendarEvent(
       };
     }
 
+    const effectiveSendUpdates: 'all' | 'externalOnly' | 'none' =
+      sendUpdates ?? (attendeeEmails.length > 0 ? 'all' : 'none');
+
     const response = await calendar.events.insert({
       calendarId: 'primary',
-      conferenceDataVersion: isOnline ? 1 : 0,
-      sendUpdates: attendeeEmails.length > 0 ? 'all' : 'none',
+      conferenceDataVersion: shouldCreateConference ? 1 : 0,
+      sendUpdates: effectiveSendUpdates,
       requestBody: eventPayload,
     });
 
     const data = response.data;
     const realMeetLink =
       data.hangoutLink ||
-      data.conferenceData?.entryPoints?.find((ep) => ep.entryPointType === 'video')?.uri;
+      data.conferenceData?.entryPoints?.find((ep) => ep.entryPointType === 'video')?.uri ||
+      meetLink;
 
     return {
       success: true,
@@ -231,6 +243,8 @@ export interface UpdateGoogleCalendarEventData {
   endTime?: string; // "HH:mm"
   isOnline?: boolean;
   location?: string;
+  meetLink?: string;
+  sendUpdates?: 'all' | 'externalOnly' | 'none';
 }
 
 /**
@@ -287,14 +301,16 @@ export async function updateGoogleCalendarEvent(
         : `[JESic] ${eventData.title}`;
     }
 
-    if (eventData.description !== undefined) {
+    if (eventData.description !== undefined || eventData.meetLink) {
       patchBody.description = [
-        eventData.description,
-        '',
+        eventData.description || '',
+        eventData.isOnline !== false && eventData.meetLink
+          ? `🔗 Link Google Meet: ${eventData.meetLink}`
+          : '',
         'Organizzato tramite JESic Meet (Junior Enterprise Sicilia)',
       ]
         .filter(Boolean)
-        .join('\n');
+        .join('\n\n');
     }
 
     if (eventData.date && eventData.startTime && eventData.endTime) {
@@ -308,20 +324,24 @@ export async function updateGoogleCalendarEvent(
       };
     }
 
-    if (eventData.location !== undefined || eventData.isOnline !== undefined) {
-      patchBody.location = eventData.isOnline ? 'Google Meet' : eventData.location || 'Sede JESic';
+    if (eventData.location !== undefined || eventData.isOnline !== undefined || eventData.meetLink) {
+      patchBody.location = eventData.isOnline
+        ? eventData.meetLink || 'Google Meet'
+        : eventData.location || 'Sede JESic';
     }
+
+    const effectiveSendUpdates: 'all' | 'externalOnly' | 'none' = eventData.sendUpdates ?? 'none';
 
     let response: any;
     try {
       response = await calendar.events.patch({
         calendarId: 'primary',
         eventId: googleEventId,
-        sendUpdates: 'all',
+        sendUpdates: effectiveSendUpdates,
         requestBody: patchBody,
       });
     } catch (patchErr: any) {
-      console.warn("Patch con sendUpdates:'all' non riuscito, ritento senza sendUpdates:", patchErr?.message);
+      console.warn(`Patch con sendUpdates:'${effectiveSendUpdates}' non riuscito, ritento senza sendUpdates:`, patchErr?.message);
       response = await calendar.events.patch({
         calendarId: 'primary',
         eventId: googleEventId,
