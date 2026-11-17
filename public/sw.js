@@ -5,21 +5,47 @@
  * - self.skipWaiting() all'installazione
  * - self.clients.claim() all'attivazione con pulizia automatica di vecchie cache
  * - Strategia Network-First per navigazione e HTML (mai bloccare index.html su versioni vecchie)
- * - Bypass assoluto della cache per tutte le chiamate /api/ e WebSocket /ws
- * - Supporto Notifiche Push reali in background con click focus/navigation
+ * - Bypass assoluto della cache per tutte le chiamate /api/, WebSocket /ws e callback OAuth
+ * - Conformità rigorosa Apple WebKit userVisibleOnly: ogni evento push chiama sempre showNotification()
+ * - Auto-ripristino su rotazione endpoint APNs (pushsubscriptionchange)
  */
 
-const CACHE_NAME = 'jesic-pwa-v6';
+const CACHE_NAME = 'jesic-pwa-v7';
+const PUSH_META_CACHE = 'jesic-push-meta';
+const PUSH_META_KEY = '/__push_meta__';
 
 // Tracciamento dei client aperti in modalità standalone (Web App installata sullo smartphone)
 const standaloneClientIds = new Set();
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function readPushMeta() {
+  try {
+    const cache = await caches.open(PUSH_META_CACHE);
+    const res = await cache.match(PUSH_META_KEY);
+    if (!res) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 // Installazione: salta l'attesa per attivarsi immediatamente
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
-// Attivazione: prende subito il controllo dei client e pulisce le vecchie cache
+// Attivazione: prende subito il controllo dei client e pulisce le vecchie cache applicative
+// (Preserva PUSH_META_CACHE per mantenere i metadati di auto-ripristino Push)
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     Promise.all([
@@ -27,7 +53,7 @@ self.addEventListener('activate', (event) => {
       caches.keys().then((keys) =>
         Promise.all(
           keys.map((key) => {
-            if (key !== CACHE_NAME) {
+            if (key !== CACHE_NAME && key !== PUSH_META_CACHE) {
               return caches.delete(key);
             }
           })
@@ -56,18 +82,27 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // 1. Non intercettare /api/, WebSocket o richieste non GET (sempre direttamente da rete)
-  if (request.method !== 'GET' || url.pathname.startsWith('/api') || url.pathname.startsWith('/ws')) {
+  // 1. Non intercettare /api/, WebSocket, richieste non GET o callback OAuth Google
+  if (
+    request.method !== 'GET' ||
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/ws') ||
+    url.search.includes('code=')
+  ) {
     return;
   }
 
   // 2. Navigazione / Documenti HTML: NETWORK-FIRST con fallback cache se offline
-  // Questo garantisce che chi apre la Web App riceva SEMPRE l'ultima versione di index.html
-  if (request.mode === 'navigate' || request.destination === 'document' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+  if (
+    request.mode === 'navigate' ||
+    request.destination === 'document' ||
+    url.pathname === '/' ||
+    url.pathname.endsWith('.html')
+  ) {
     event.respondWith(
       fetch(request, { cache: 'no-store' })
         .then((response) => {
-          if (response && response.status === 200) {
+          if (response && response.status === 200 && !url.search.includes('code=')) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(request, clone)).catch(() => {});
           }
@@ -80,7 +115,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Risorse statiche (JS, CSS, Font, Immagini): Network-first o Cache con revalidation
+  // 3. Risorse statiche (JS, CSS, Font, Immagini): Network-first con fallback cache
   event.respondWith(
     fetch(request)
       .then((networkResponse) => {
@@ -97,6 +132,8 @@ self.addEventListener('fetch', (event) => {
 });
 
 // Ascolto delle Notifiche Push in background
+// REGOLA CRITICA APPLE (WebKit/APNs): ogni evento 'push' DEVE sempre invocare showNotification(),
+// altrimenti iOS/Safari revoca automaticamente la sottoscrizione e disattiva i permessi dopo 3 eventi silenziosi.
 self.addEventListener('push', (event) => {
   let data = {
     title: 'JESic Meet',
@@ -134,39 +171,27 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
       try {
-        // Verifica se l'utente ha finestre o schede dell'app/sito attualmente aperte
-        const windowClients = await self.clients.matchAll({
-          type: 'window',
-          includeUncontrolled: true,
-        });
-
-        // L'utente sta già usando l'app o il sito se almeno una finestra è visibile e/o focalizzata
-        const isUserActiveInApp = windowClients.some(
-          (client) => client.focused || client.visibilityState === 'visible'
-        );
-
-        // Se l'utente ha la pagina aperta sullo schermo e sta già usando l'app,
-        // NON mostrare alcuna notifica di sistema (arriverà solo a schermo spento, app chiusa o in background)
-        if (isUserActiveInApp) {
-          // Opzionale: invia un messaggio interno silenzioso per aggiornare la UI in tempo reale
-          windowClients.forEach((client) => {
-            try {
-              client.postMessage({
-                type: 'PUSH_SUPPRESSED_ACTIVE_APP',
-                data,
-              });
-            } catch (postErr) {
-              // Ignore postMessage error
-            }
-          });
-          return;
-        }
-
-        // Se l'app/sito sono chiusi, ridotti in background o con telefono bloccato, mostra la notifica
+        // Mostra SEMPRE la notifica di sistema per rispettare userVisibleOnly su Apple iOS/macOS
         await self.registration.showNotification(
           data.title || 'JESic Meet',
           notificationOptions
         );
+
+        // Avvisa eventuali finestre aperte per mantenere la UI sincronizzata in tempo reale
+        const windowClients = await self.clients.matchAll({
+          type: 'window',
+          includeUncontrolled: true,
+        });
+        windowClients.forEach((client) => {
+          try {
+            client.postMessage({
+              type: 'PUSH_RECEIVED',
+              data,
+            });
+          } catch {
+            // Ignora errori postMessage
+          }
+        });
 
         // Aggiorna il pallino/contatore sull'icona dell'app installata (PWA App Badging API)
         try {
@@ -174,11 +199,10 @@ self.addEventListener('push', (event) => {
             const rawCount = Number(data?.badgeCount || data?.unreadCount || 1);
             await self.navigator.setAppBadge(rawCount > 0 ? rawCount : 1);
           }
-        } catch (badgeErr) {
+        } catch {
           // Ignora se non supportato
         }
-      } catch (err) {
-        // Fallback in caso di errori di matchAll
+      } catch {
         await self.registration.showNotification(
           data.title || 'JESic Meet',
           notificationOptions
@@ -188,13 +212,69 @@ self.addEventListener('push', (event) => {
   );
 });
 
+// Auto-ripristino automatico quando Apple APNs o il browser ruota/rinnova l'endpoint Push
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    (async () => {
+      try {
+        const meta = await readPushMeta();
+        if (!meta || !meta.userId || meta.disabled === true) {
+          return;
+        }
+
+        let newSub = event.newSubscription || null;
+        if (!newSub) {
+          let applicationServerKey =
+            event.oldSubscription &&
+            event.oldSubscription.options &&
+            event.oldSubscription.options.applicationServerKey
+              ? event.oldSubscription.options.applicationServerKey
+              : null;
+
+          if (!applicationServerKey) {
+            let publicKey = meta.publicKey || '';
+            if (!publicKey) {
+              const keyRes = await fetch('/api/push/public-key', { cache: 'no-store' });
+              if (keyRes.ok) {
+                const keyData = await keyRes.json();
+                publicKey = keyData.publicKey || '';
+              }
+            }
+            if (publicKey) {
+              applicationServerKey = urlBase64ToUint8Array(publicKey);
+            }
+          }
+
+          if (applicationServerKey) {
+            newSub = await self.registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey,
+            });
+          }
+        }
+
+        if (newSub) {
+          await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: meta.userId,
+              subscription: newSub.toJSON(),
+              userAgent: 'service-worker-pushsubscriptionchange',
+            }),
+          });
+        }
+      } catch (err) {
+        console.warn('[SW] Errore rinnovo automatico pushsubscriptionchange:', err);
+      }
+    })()
+  );
+});
+
 // Click sulla notifica: apre o porta in primo piano l'applicazione Web App (PWA installata sullo smartphone)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  // Costruisci SEMPRE l'URL assoluto completo con protocollo e host corrispondenti allo scope della PWA.
-  // Su iOS Safari e Android WebAPK, i link relativi non vengono associati alla PWA installata
-  // e causano l'apertura errata del browser normale.
   const rawTarget = event.notification.data?.url || '/';
   const fullTargetUrl = new URL(rawTarget, self.location.origin).href;
 
@@ -205,14 +285,12 @@ self.addEventListener('notificationclick', (event) => {
         includeUncontrolled: true,
       });
 
-      // 1. Cerca prima se una finestra dell'app PWA standalone è già aperta
       const standaloneClient = windowClients.find(
         (c) =>
           standaloneClientIds.has(c.id) ||
           (c.url && (c.url.includes('source=pwa') || c.url.startsWith(self.location.origin)))
       );
 
-      // 2. Se una finestra dell'app è aperta, portala in primo piano e naviga
       if (standaloneClient && 'focus' in standaloneClient) {
         await standaloneClient.focus();
         try {
@@ -220,21 +298,17 @@ self.addEventListener('notificationclick', (event) => {
             type: 'PWA_NAVIGATE_TO_URL',
             url: fullTargetUrl,
           });
-        } catch (postErr) {}
+        } catch {}
         if ('navigate' in standaloneClient && standaloneClient.url !== fullTargetUrl) {
           await standaloneClient.navigate(fullTargetUrl);
         }
         return;
       }
 
-      // 3. Se l'app non è aperta (telefono bloccato, app chiusa o in background):
-      // clients.openWindow con URL assoluto corrispondente allo scope del manifest
-      // indica al sistema operativo mobile (Android WebAPK e iOS Standalone) di aprire l'applicazione scaricata!
       if (self.clients.openWindow) {
         return self.clients.openWindow(fullTargetUrl);
       }
 
-      // 4. Fallback se openWindow non è disponibile
       if (windowClients.length > 0 && 'focus' in windowClients[0]) {
         const fallbackClient = windowClients[0];
         await fallbackClient.focus();

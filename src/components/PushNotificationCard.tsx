@@ -11,10 +11,10 @@ import {
 } from 'lucide-react';
 import {
   isPushNotificationSupported,
-  getExistingPushSubscription,
   subscribeToPushNotifications,
   unsubscribeFromPushNotifications,
-  registerServiceWorker,
+  syncOrRestorePushSubscription,
+  isPushExplicitlyDisabled,
 } from '../utils/pushManager';
 
 interface PushNotificationCardProps {
@@ -34,19 +34,37 @@ export const PushNotificationCard: React.FC<PushNotificationCardProps> = ({
   useEffect(() => {
     const supported = isPushNotificationSupported();
     setIsSupported(supported);
+    if (!supported) return;
 
-    if (supported) {
-      if (typeof Notification !== 'undefined') {
-        setPermissionState(Notification.permission);
+    const refreshPushStatus = () => {
+      if (isPushExplicitlyDisabled(currentUser.id)) {
+        setIsSubscribed(false);
+        if (typeof Notification !== 'undefined') {
+          setPermissionState(Notification.permission);
+        }
+        return;
       }
 
-      registerServiceWorker().then(() => {
-        getExistingPushSubscription().then((sub) => {
-          setIsSubscribed(Boolean(sub));
-        });
+      syncOrRestorePushSubscription(currentUser.id, { force: true }).then((status) => {
+        setPermissionState(status.permission);
+        setIsSubscribed(status.isSubscribed);
       });
-    }
-  }, []);
+    };
+
+    refreshPushStatus();
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshPushStatus();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', refreshPushStatus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', refreshPushStatus);
+    };
+  }, [currentUser.id]);
 
   const handleToggle = async () => {
     if (!isSupported) {
@@ -70,6 +88,8 @@ export const PushNotificationCard: React.FC<PushNotificationCardProps> = ({
         if (result.success) {
           setIsSubscribed(true);
           onNotificationFeedback?.('Notifiche push attivate!');
+        } else if (result.error) {
+          onNotificationFeedback?.(result.error);
         }
       }
     } catch {
@@ -82,7 +102,7 @@ export const PushNotificationCard: React.FC<PushNotificationCardProps> = ({
   if (!isSupported) return null;
 
   return (
-    <div className="bg-white dark:bg-neutral-900 rounded-3xl p-4 sm:p-5 border border-neutral-200/90 dark:border-neutral-800 shadow-xs transition-colors">
+    <div className="bg-white dark:bg-neutral-900 rounded-3xl p-4 sm:p-5 border border-neutral-200/90 dark:border-neutral-800 shadow-xs transition-colors space-y-2.5">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <div
@@ -141,6 +161,12 @@ export const PushNotificationCard: React.FC<PushNotificationCardProps> = ({
           />
         </button>
       </div>
+
+      {!isSubscribed && permissionState === 'denied' && (
+        <p className="text-[10px] sm:text-[11px] text-red-600 dark:text-red-400 bg-red-50/70 dark:bg-red-950/30 border border-red-200/70 dark:border-red-900/50 rounded-xl px-3 py-2 leading-snug">
+          Le notifiche sono bloccate dal dispositivo. Su iPhone/iPad vai in Impostazioni → JESic Meet → Notifiche e consenti gli avvisi.
+        </p>
+      )}
     </div>
   );
 };

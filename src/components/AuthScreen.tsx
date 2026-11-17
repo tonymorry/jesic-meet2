@@ -8,9 +8,11 @@
  * - Brand identity rigorosa: Bianco #ffffff, Nero #1e1e1e, Rosso #f23e2e, Font Ubuntu.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User } from '../types';
 import { useGoogleLogin } from '@react-oauth/google';
+import { isInstalledPwa } from '../utils/pwaHelper';
+import { startGoogleOAuthRedirect } from '../utils/googleOAuthPwa';
 import {
   UserPlus,
   LogIn,
@@ -112,12 +114,53 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     },
     onNonOAuthError: (nonOAuthErr) => {
       console.warn('Finestra Google chiusa o bloccata:', nonOAuthErr);
-      setIsGoogleLoading(false);
       if (nonOAuthErr.type === 'popup_failed_to_open') {
-        setErrorMsg('Il popup di Google è stato bloccato dal browser. Consenti i popup per questo sito e riprova.');
+        // Fallback automatico al flusso redirect se il browser blocca i popup
+        startGoogleOAuthRedirect({ mode: 'login', fromPwa: isInstalledPwa() }).catch((err: any) => {
+          setIsGoogleLoading(false);
+          setErrorMsg(err?.message || 'Popup Google bloccato dal browser.');
+        });
+        return;
       }
+      setIsGoogleLoading(false);
     },
   });
+
+  // Se l'utente chiude SFSafariViewController su iOS PWA senza completare, ripristina il bottone
+  useEffect(() => {
+    if (!isGoogleLoading) return;
+    const handleReturn = () => {
+      if (document.visibilityState === 'visible') {
+        setTimeout(() => setIsGoogleLoading(false), 1200);
+      }
+    };
+    window.addEventListener('focus', handleReturn);
+    document.addEventListener('visibilitychange', handleReturn);
+    return () => {
+      window.removeEventListener('focus', handleReturn);
+      document.removeEventListener('visibilitychange', handleReturn);
+    };
+  }, [isGoogleLoading]);
+
+  const handleGoogleButtonClick = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setIsGoogleLoading(true);
+
+    // In modalità App Installata (PWA su iPhone/iPad/Android) i popup OAuth non comunicano con la finestra standalone:
+    // usa sempre il flusso Redirect con access_type=offline e handoff automatico.
+    if (isInstalledPwa()) {
+      try {
+        await startGoogleOAuthRedirect({ mode: 'login', fromPwa: true });
+      } catch (err: any) {
+        setIsGoogleLoading(false);
+        setErrorMsg(err?.message || 'Impossibile avviare il collegamento con Google.');
+      }
+      return;
+    }
+
+    loginWithGoogle();
+  };
 
   const handleRegisterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -522,12 +565,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <div className="w-full">
                 <button
                   type="button"
-                  onClick={() => {
-                    setErrorMsg(null);
-                    setSuccessMsg(null);
-                    setIsGoogleLoading(true);
-                    loginWithGoogle();
-                  }}
+                  onClick={handleGoogleButtonClick}
                   disabled={isGoogleLoading}
                   className="w-full py-2.5 px-4 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-100 font-bold text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 shadow-2xs hover:border-[#f23e2e] transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50 active:scale-98"
                 >

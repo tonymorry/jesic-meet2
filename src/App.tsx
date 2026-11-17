@@ -45,6 +45,14 @@ import { PushBanner } from './components/PushBanner';
 import { SetGooglePasswordModal } from './components/SetGooglePasswordModal';
 import { prefetchChat, prefetchAllUserGroupsChats } from './utils/chatCache';
 import { realtimeClient, useRealtimeSubscription } from './utils/realtime';
+import { syncOrRestorePushSubscription } from './utils/pushManager';
+import {
+  decodeGoogleOAuthState,
+  getPendingOAuthTransaction,
+  clearPendingOAuthTransaction,
+} from './utils/googleOAuthPwa';
+
+const processedGoogleOAuthCodes = new Set<string>();
 
 // Chiavi LocalStorage versione pulita V3
 const STORAGE_USERS_KEY = 'jesic_meet_v3_users';
@@ -631,11 +639,14 @@ export default function App() {
     syncAllAppData();
   });
 
-  // Ri-sincronizza istantaneamente tutti i dati quando l'utente torna sulla pagina
+  // Ri-sincronizza istantaneamente tutti i dati e le push quando l'utente torna sulla pagina
   useEffect(() => {
     const handleReSyncOnFocus = () => {
       if (document.visibilityState === 'visible') {
         syncAllAppData();
+        if (currentUserIdRef.current) {
+          syncOrRestorePushSubscription(currentUserIdRef.current);
+        }
       }
     };
 
@@ -645,6 +656,26 @@ export default function App() {
       window.removeEventListener('focus', handleReSyncOnFocus);
       document.removeEventListener('visibilitychange', handleReSyncOnFocus);
     };
+  }, [syncAllAppData]);
+
+  // Auto-ripristino e sincronizzazione Push all'accesso o avvio PWA (anti-disattivazione Apple iOS)
+  useEffect(() => {
+    if (currentUser?.id) {
+      syncOrRestorePushSubscription(currentUser.id);
+    }
+  }, [currentUser?.id]);
+
+  // Ascolta notifiche ricevute dal Service Worker per mantenere la UI aggiornata istantaneamente
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    const handleSwMessage = (event: MessageEvent) => {
+      const msgType = event.data?.type;
+      if (msgType === 'PUSH_RECEIVED' || msgType === 'PUSH_SUPPRESSED_ACTIVE_APP') {
+        syncAllAppData();
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
   }, [syncAllAppData]);
 
 
@@ -1233,6 +1264,178 @@ export default function App() {
       throw e;
     }
   };
+
+  // Banner feedback per completamento o errore Google OAuth Redirect (iOS PWA)
+  const [oauthFeedbackBanner, setOauthFeedbackBanner] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  // Gestione ritorno dal flusso Redirect Google OAuth2 (usato su iOS PWA / app scaricata)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const oauthError = params.get('error');
+    const rawState = params.get('state');
+    const grantedScope = params.get('scope') || undefined;
+
+    const decodedState = decodeGoogleOAuthState(rawState);
+    const pendingTx = getPendingOAuthTransaction();
+
+    if (!decodedState && !pendingTx) {
+      return;
+    }
+    if (!code && !oauthError) {
+      return;
+    }
+
+    // Pulisci immediatamente i parametri OAuth dalla barra URL
+    try {
+      const cleanParams = new URLSearchParams(window.location.search);
+      ['code', 'scope', 'authuser', 'prompt', 'state', 'error', 'error_description'].forEach((k) =>
+        cleanParams.delete(k)
+      );
+      const nextQuery = cleanParams.toString();
+      const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', nextUrl);
+    } catch {}
+
+    if (oauthError) {
+      clearPendingOAuthTransaction();
+      const errMsg =
+        oauthError === 'access_denied'
+          ? 'Autorizzazione Google Calendar annullata.'
+          : oauthError === 'redirect_uri_mismatch'
+          ? `Configurazione Google OAuth: aggiungi "${window.location.origin}" agli URI di reindirizzamento autorizzati in Google Cloud Console.`
+          : `Accesso Google non completato (${oauthError}).`;
+      setOauthFeedbackBanner({ type: 'error', message: errMsg });
+      return;
+    }
+
+    if (code) {
+      if (processedGoogleOAuthCodes.has(code)) return;
+      processedGoogleOAuthCodes.add(code);
+
+      const linkToUserId = decodedState?.linkToUserId || pendingTx?.linkToUserId;
+      const handoffNonce = decodedState?.nonce || pendingTx?.nonce;
+      const redirectUri = pendingTx?.redirectUri || window.location.origin;
+
+      (async () => {
+        try {
+          const res = await fetch('/api/users/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code,
+              grantedScope,
+              redirectUri,
+              linkToUserId,
+              handoffNonce,
+            }),
+          });
+
+          const data = await res.json().catch(() => ({}));
+          clearPendingOAuthTransaction();
+
+          if (!res.ok || !data.user) {
+            setOauthFeedbackBanner({
+              type: 'error',
+              message: data.error || 'Impossibile completare il collegamento con Google Calendar.',
+            });
+            return;
+          }
+
+          const syncedUser: User = {
+            ...data.user,
+            googleCalendarConnected: Boolean(data.user.googleCalendarConnected),
+          };
+          setUsers((prev) => [
+            ...prev.filter(
+              (u) => u.id !== syncedUser.id && u.email.toLowerCase() !== syncedUser.email.toLowerCase()
+            ),
+            syncedUser,
+          ]);
+          setCurrentUser((prev) => (prev ? { ...prev, ...syncedUser } : syncedUser));
+
+          if (syncedUser.hasPassword === false) {
+            setUserPendingPassword(syncedUser);
+          }
+
+          const openedInIosSafariSheet = Boolean(decodedState?.fromPwa && !isInstalledPwa());
+          setOauthFeedbackBanner({
+            type: 'success',
+            message: openedInIosSafariSheet
+              ? "Google Calendar collegato! Tocca 'Fine' in alto a sinistra per tornare all'app."
+              : 'Google Calendar collegato con successo!',
+          });
+          if (!openedInIosSafariSheet) {
+            setTimeout(() => setOauthFeedbackBanner(null), 4500);
+          }
+          syncAllAppData();
+        } catch (err: any) {
+          clearPendingOAuthTransaction();
+          setOauthFeedbackBanner({
+            type: 'error',
+            message: err?.message || 'Errore durante la sincronizzazione con Google.',
+          });
+        }
+      })();
+    }
+  }, [syncAllAppData]);
+
+  // Handoff automatico su iOS PWA quando l'utente chiude SFSafariViewController ("Fine") e rientra nell'app standalone
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const checkPendingGoogleHandoff = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const pendingTx = getPendingOAuthTransaction();
+      if (!pendingTx?.nonce) return;
+
+      try {
+        const res = await fetch(
+          `/api/auth/google/handoff?nonce=${encodeURIComponent(pendingTx.nonce)}`,
+          { cache: 'no-store' }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data?.ready || !data?.user) return;
+
+        clearPendingOAuthTransaction();
+        const handedOffUser: User = {
+          ...data.user,
+          googleCalendarConnected: Boolean(data.user.googleCalendarConnected),
+        };
+        setUsers((prev) => [
+          ...prev.filter(
+            (u) => u.id !== handedOffUser.id && u.email.toLowerCase() !== handedOffUser.email.toLowerCase()
+          ),
+          handedOffUser,
+        ]);
+        setCurrentUser((prev) => (prev ? { ...prev, ...handedOffUser } : handedOffUser));
+
+        if (handedOffUser.hasPassword === false) {
+          setUserPendingPassword(handedOffUser);
+        }
+
+        setOauthFeedbackBanner({
+          type: 'success',
+          message: 'Account Google e Calendar sincronizzati con successo!',
+        });
+        setTimeout(() => setOauthFeedbackBanner(null), 4500);
+        syncAllAppData();
+      } catch {}
+    };
+
+    checkPendingGoogleHandoff();
+    window.addEventListener('focus', checkPendingGoogleHandoff);
+    document.addEventListener('visibilitychange', checkPendingGoogleHandoff);
+    return () => {
+      window.removeEventListener('focus', checkPendingGoogleHandoff);
+      document.removeEventListener('visibilitychange', checkPendingGoogleHandoff);
+    };
+  }, [syncAllAppData]);
 
   // Collegamento / Ricollegamento Google Calendar dal Profilo dell'utente già autenticato
   const handleConnectGoogleCalendar = async (code: string, grantedScope?: string) => {
@@ -2046,6 +2249,7 @@ export default function App() {
         ...updatedEvent,
         userId: currentUser?.id,
         googleAccessToken: currentUser?.googleAccessToken,
+        googleRefreshToken: currentUser?.googleRefreshToken,
       }),
     }).catch((e) => console.log('[API update poll sync]', e));
   };
@@ -2222,8 +2426,15 @@ export default function App() {
 
     fetch(`/api/events/${eventId}/decline`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: currentUser.id }),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentUser.googleAccessToken ? { Authorization: `Bearer ${currentUser.googleAccessToken}` } : {}),
+      },
+      body: JSON.stringify({
+        userId: currentUser.id,
+        googleAccessToken: currentUser.googleAccessToken,
+        googleRefreshToken: currentUser.googleRefreshToken,
+      }),
     }).catch((e) => console.log('[API decline poll]', e));
   };
 
@@ -2619,6 +2830,27 @@ export default function App() {
           isReady={isAuthDetermined}
           onFinish={() => setShowSplash(false)}
         />
+      )}
+
+      {/* Banner feedback OAuth Google (visibile anche su schermata login o SFSafariViewController iOS) */}
+      {oauthFeedbackBanner && (
+        <div
+          className={`fixed top-3 left-1/2 -translate-x-1/2 z-[100] w-[calc(100%-1.5rem)] max-w-md px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center justify-between gap-3 ${
+            oauthFeedbackBanner.type === 'success'
+              ? 'bg-emerald-600 text-white border-emerald-500'
+              : 'bg-red-600 text-white border-red-500'
+          }`}
+        >
+          <span className="leading-snug">{oauthFeedbackBanner.message}</span>
+          <button
+            type="button"
+            data-mobile-compact="true"
+            onClick={() => setOauthFeedbackBanner(null)}
+            className="px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] font-black shrink-0 cursor-pointer"
+          >
+            OK
+          </button>
+        </div>
       )}
 
       {/* 2. ROTTE PUBBLICHE ESTERNE (/prenota-call, /privacy, /terms) */}

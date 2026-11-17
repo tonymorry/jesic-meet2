@@ -340,17 +340,65 @@ app.get('/api/users', async (_req: Request, res: Response) => {
   }
 });
 
+// Store temporaneo in-memory per handoff OAuth Google su iOS PWA (SFSafariViewController -> Standalone WebView)
+const pendingGoogleOAuthHandoffs = new Map<
+  string,
+  { user: any; calendarScopeGranted: boolean; expiresAt: number }
+>();
+
+function storeGoogleOAuthHandoff(nonce: unknown, user: any, calendarScopeGranted: boolean) {
+  if (typeof nonce !== 'string' || !nonce.trim()) return;
+  const now = Date.now();
+  for (const [k, v] of pendingGoogleOAuthHandoffs.entries()) {
+    if (v.expiresAt < now) {
+      pendingGoogleOAuthHandoffs.delete(k);
+    }
+  }
+  pendingGoogleOAuthHandoffs.set(nonce.trim(), {
+    user,
+    calendarScopeGranted,
+    expiresAt: now + 10 * 60 * 1000,
+  });
+}
+
+// GET /api/auth/google/config - Restituisce il Client ID Google pubblico per i flussi redirect PWA
+app.get('/api/auth/google/config', (_req: Request, res: Response) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
+  return res.json({ clientId });
+});
+
+// GET /api/auth/google/handoff?nonce=... - Recupera la sessione/token dopo OAuth redirect su iOS PWA
+app.get('/api/auth/google/handoff', (req: Request, res: Response) => {
+  const nonce = typeof req.query.nonce === 'string' ? req.query.nonce.trim() : '';
+  if (!nonce) {
+    return res.json({ ready: false });
+  }
+  const entry = pendingGoogleOAuthHandoffs.get(nonce);
+  if (!entry || entry.expiresAt < Date.now()) {
+    pendingGoogleOAuthHandoffs.delete(nonce);
+    return res.json({ ready: false });
+  }
+  pendingGoogleOAuthHandoffs.delete(nonce);
+  return res.json({
+    ready: true,
+    user: entry.user,
+    calendarScopeGranted: entry.calendarScopeGranted,
+  });
+});
+
 // Gestione Registrazione / Sincronizzazione utente nel Database MongoDB
 // REGOLA:
-// 1. Supporta il vero Google OAuth2 con verifica del token JWT (credential) tramite 'google-auth-library'.
+// 1. Supporta il vero Google OAuth2 con Authorization Code sia con popup ('postmessage') che con redirect URI (iOS PWA).
 // 2. I token Google sono opzionali, salvando null se assenti.
 // 3. Trova o crea l'utente SOLO tramite email nel database MongoDB (assegnando ruolo 'user' ai nuovi).
 const handleUserSync = async (req: Request, res: Response) => {
   try {
     const {
-      code, // Authorization Code restituito da useGoogleLogin (flow: 'auth-code')
+      code, // Authorization Code restituito da Google OAuth2 (popup o redirect)
       credential, // JWT ID Token restituito da @react-oauth/google (alternativo)
       grantedScope, // Scope restituito dal client nella CodeResponse
+      redirectUri, // Opzionale: redirect_uri usato su flusso redirect PWA (default 'postmessage')
+      handoffNonce, // Opzionale: nonce per sincronizzare SFSafariViewController -> PWA iOS
       linkToUserId, // Opzionale: ID utente esistente a cui collegare Google Calendar dal Profilo
       id,
       name,
@@ -376,13 +424,17 @@ const handleUserSync = async (req: Request, res: Response) => {
     let codeExchanged = false;
     let grantedCalendarScope = false;
 
+    const effectiveRedirectUri =
+      typeof redirectUri === 'string' && redirectUri.trim().length > 0
+        ? redirectUri.trim()
+        : 'postmessage';
+
     // 1. Scambio dell'Authorization Code con token reali Google (flow: 'auth-code')
-    // REGOLA CRITICA: redirect_uri deve essere 'postmessage' per evitare redirect_uri_mismatch
     if (code && typeof code === 'string') {
       try {
         const tokenResponse = await oAuth2Client.getToken({
           code,
-          redirect_uri: 'postmessage',
+          redirect_uri: effectiveRedirectUri,
         });
         const tokens = tokenResponse.tokens;
         codeExchanged = true;
@@ -458,10 +510,10 @@ const handleUserSync = async (req: Request, res: Response) => {
           tokenErr?.response?.data?.error ||
           tokenErr?.message ||
           'Errore scambio codice Google';
-        console.error('Errore scambio code OAuth2 Google (redirect_uri: postmessage):', gErrDetail);
+        console.error(`Errore scambio code OAuth2 Google (redirect_uri: ${effectiveRedirectUri}):`, gErrDetail);
         if (!cleanEmail) {
           return res.status(401).json({
-            error: `Impossibile completare l'autenticazione Google (${gErrDetail}). Verifica che il Client ID/Secret Google siano configurati correttamente.`,
+            error: `Impossibile completare l'autenticazione Google (${gErrDetail}). Verifica che il Client ID/Secret Google e l'URI di reindirizzamento autorizzato (${effectiveRedirectUri}) siano configurati correttamente.`,
           });
         }
       }
@@ -579,7 +631,9 @@ const handleUserSync = async (req: Request, res: Response) => {
           groupMemberships: jsonUser.groupMemberships,
         },
       });
-      return res.json({ user: jsonUser, calendarScopeGranted: hasNewCalendarGrant || Boolean(existing.googleRefreshToken) });
+      const calendarScopeGrantedResult = hasNewCalendarGrant || Boolean(existing.googleRefreshToken);
+      storeGoogleOAuthHandoff(handoffNonce, jsonUser, calendarScopeGrantedResult);
+      return res.json({ user: jsonUser, calendarScopeGranted: calendarScopeGrantedResult });
     }
 
     // REGOLA: Il nuovo utente viene creato con nome, cognome, email, avatarUrl, eventuale password, credenziali Google e groupMemberships vuoto.
@@ -640,6 +694,7 @@ const handleUserSync = async (req: Request, res: Response) => {
       console.warn('[Welcome Email] Errore asincrono invio benvenuto:', welcomeErr?.message || welcomeErr);
     });
 
+    storeGoogleOAuthHandoff(handoffNonce, jsonUser, hasNewCalendarGrant);
     return res.status(201).json({ user: jsonUser, calendarScopeGranted: hasNewCalendarGrant });
   } catch (err: any) {
     console.error('Errore salvataggio UserModel MongoDB:', err.message);
@@ -3377,12 +3432,13 @@ app.post('/api/events', async (req: Request, res: Response) => {
       }
       if (calSync.googleCalendarEvents.length > 0) {
         eventData.googleCalendarEvents = calSync.googleCalendarEvents;
-        const syncedSet = new Set(calSync.googleCalendarEvents.map((e) => e.userId));
-        if (Array.isArray(eventData.participants)) {
-          eventData.participants = eventData.participants.map((p: any) =>
-            syncedSet.has(String(p.userId)) ? { ...p, googleCalendarSynced: true } : p
-          );
-        }
+      }
+      const syncedSet = new Set(calSync.googleCalendarEvents.map((e) => e.userId));
+      if (Array.isArray(eventData.participants)) {
+        eventData.participants = eventData.participants.map((p: any) => ({
+          ...p,
+          googleCalendarSynced: syncedSet.has(String(p.userId)),
+        }));
       }
     } catch (gcalErr: any) {
       console.warn("Errore sincronizzazione diretta Google Calendar:", gcalErr?.message || gcalErr);
@@ -3628,9 +3684,10 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
           ? updates.participants
           : existingObj.participants;
         if (Array.isArray(baseParticipants) && baseParticipants.length > 0) {
-          updates.participants = baseParticipants.map((p: any) =>
-            syncedSet.has(String(p.userId)) ? { ...p, googleCalendarSynced: true } : p
-          );
+          updates.participants = baseParticipants.map((p: any) => ({
+            ...p,
+            googleCalendarSynced: syncedSet.has(String(p.userId)),
+          }));
         }
       } catch (gcalErr: any) {
         console.warn("Google Calendar patch multi-user sync warning:", gcalErr?.message || gcalErr);
@@ -4701,6 +4758,7 @@ app.post('/api/push/subscribe', async (req: Request, res: Response) => {
             auth: subscription.keys.auth,
           },
           userAgent: userAgent || req.headers['user-agent'] || '',
+          updatedAt: new Date(),
         },
       },
       { upsert: true, new: true }
@@ -4740,7 +4798,9 @@ app.get('/api/push/status', async (req: Request, res: Response) => {
 
   try {
     if (endpoint) {
-      const exists = await PushSubscriptionModel.exists({ endpoint: String(endpoint) });
+      const filter: Record<string, any> = { endpoint: String(endpoint) };
+      if (userId) filter.userId = String(userId);
+      const exists = await PushSubscriptionModel.exists(filter);
       return res.json({ subscribed: Boolean(exists) });
     }
 

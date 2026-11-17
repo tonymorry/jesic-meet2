@@ -13,6 +13,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AppRole, User, UserSystemRole, Group } from '../types';
 import { useGoogleLogin } from '@react-oauth/google';
+import { isInstalledPwa } from '../utils/pwaHelper';
+import { startGoogleOAuthRedirect } from '../utils/googleOAuthPwa';
 import {
   Mail,
   Calendar,
@@ -107,12 +109,55 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       showNotification('Autorizzazione Google Calendar non completata o annullata.');
     },
     onNonOAuthError: (nonOAuthErr) => {
-      setIsConnectingCalendar(false);
       if (nonOAuthErr.type === 'popup_failed_to_open') {
-        showNotification('Popup Google bloccato dal browser. Consenti i popup e riprova.');
+        startGoogleOAuthRedirect({
+          mode: 'link_calendar',
+          linkToUserId: currentUser.id,
+          loginHint: currentUser.email,
+          fromPwa: isInstalledPwa(),
+        }).catch((err: any) => {
+          setIsConnectingCalendar(false);
+          showNotification(err?.message || 'Popup Google bloccato dal browser.');
+        });
+        return;
       }
+      setIsConnectingCalendar(false);
     },
   });
+
+  useEffect(() => {
+    if (!isConnectingCalendar) return;
+    const handleReturn = () => {
+      if (document.visibilityState === 'visible') {
+        setTimeout(() => setIsConnectingCalendar(false), 1200);
+      }
+    };
+    window.addEventListener('focus', handleReturn);
+    document.addEventListener('visibilitychange', handleReturn);
+    return () => {
+      window.removeEventListener('focus', handleReturn);
+      document.removeEventListener('visibilitychange', handleReturn);
+    };
+  }, [isConnectingCalendar]);
+
+  const triggerConnectGoogleCalendar = async () => {
+    setIsConnectingCalendar(true);
+    if (isInstalledPwa()) {
+      try {
+        await startGoogleOAuthRedirect({
+          mode: 'link_calendar',
+          linkToUserId: currentUser.id,
+          loginHint: currentUser.email,
+          fromPwa: true,
+        });
+      } catch (err: any) {
+        setIsConnectingCalendar(false);
+        showNotification(err?.message || 'Errore durante il collegamento con Google Calendar.');
+      }
+      return;
+    }
+    connectGoogleCalendar();
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -470,8 +515,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             onClick={() => {
               const nextState = !calendarConnected;
               if (nextState && !hasCalendarAuth && onConnectGoogleCalendar) {
-                setIsConnectingCalendar(true);
-                connectGoogleCalendar();
+                triggerConnectGoogleCalendar();
                 return;
               }
               setCalendarConnected(nextState);
@@ -512,10 +556,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </p>
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsConnectingCalendar(true);
-                    connectGoogleCalendar();
-                  }}
+                  onClick={triggerConnectGoogleCalendar}
                   disabled={isConnectingCalendar}
                   className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-[10px] font-bold text-neutral-800 dark:text-neutral-100 hover:border-[#f23e2e] flex items-center gap-1 cursor-pointer shrink-0 disabled:opacity-50"
                 >
@@ -536,10 +577,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             {onConnectGoogleCalendar && (
               <button
                 type="button"
-                onClick={() => {
-                  setIsConnectingCalendar(true);
-                  connectGoogleCalendar();
-                }}
+                onClick={triggerConnectGoogleCalendar}
                 disabled={isConnectingCalendar}
                 className="w-full py-2 px-3 bg-[#f23e2e] hover:bg-red-600 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
               >

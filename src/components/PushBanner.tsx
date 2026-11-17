@@ -8,8 +8,9 @@ import { User } from '../types';
 import { Bell, X, Sparkles, CheckCircle2 } from 'lucide-react';
 import {
   isPushNotificationSupported,
-  getExistingPushSubscription,
   subscribeToPushNotifications,
+  syncOrRestorePushSubscription,
+  isPushExplicitlyDisabled,
 } from '../utils/pushManager';
 
 interface PushBannerProps {
@@ -24,18 +25,18 @@ export const PushBanner: React.FC<PushBannerProps> = ({ currentUser, onActivated
 
   useEffect(() => {
     if (!isPushNotificationSupported()) return;
+    if (isPushExplicitlyDisabled(currentUser.id)) return;
 
     // Se l'utente ha già chiuso il banner in questa sessione, non riaprirlo continuamente
     const dismissed = sessionStorage.getItem('jesic_push_banner_dismissed');
     if (dismissed === 'true') return;
 
-    // Se il permesso è già 'granted' o 'denied', controlla se è già iscritto
+    // Se il permesso è già 'granted' o 'denied', controlla/ripristina silenziosamente
     if (typeof Notification !== 'undefined') {
       if (Notification.permission === 'denied') return;
       if (Notification.permission === 'granted') {
-        getExistingPushSubscription().then((sub) => {
-          if (!sub) {
-            // Permesso concesso in precedenza ma non ancora registrato in MongoDB per questa sessione
+        syncOrRestorePushSubscription(currentUser.id).then((status) => {
+          if (!status.isSubscribed) {
             setIsVisible(true);
           }
         });
@@ -44,7 +45,7 @@ export const PushBanner: React.FC<PushBannerProps> = ({ currentUser, onActivated
     }
 
     setIsVisible(true);
-  }, []);
+  }, [currentUser.id]);
 
   const handleActivate = async () => {
     setIsSubscribing(true);
