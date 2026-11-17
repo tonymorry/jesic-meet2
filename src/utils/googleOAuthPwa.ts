@@ -22,6 +22,7 @@ export interface GoogleOAuthStatePayload {
   nonce: string;
   mode: 'login' | 'link_calendar';
   linkToUserId?: string;
+  redirectUri?: string;
   fromPwa: boolean;
 }
 
@@ -71,22 +72,38 @@ function createNonce(): string {
   return `jesic-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 }
 
-export async function resolveGoogleClientId(): Promise<string> {
+export async function resolveGoogleOAuthConfig(): Promise<{ clientId: string; redirectUri: string }> {
   const envClientId =
     (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID) ||
     '';
-  if (envClientId && envClientId !== 'jesic-meet-client-id') {
-    return envClientId;
-  }
+
+  let clientId = envClientId && envClientId !== 'jesic-meet-client-id' ? String(envClientId) : '';
+  let redirectUri = typeof window !== 'undefined' ? window.location.origin : '';
 
   try {
     const res = await fetch('/api/auth/google/config', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      if (data?.clientId) return String(data.clientId);
+      if (!clientId && data?.clientId) {
+        clientId = String(data.clientId);
+      }
+      if (data?.redirectUri && typeof window !== 'undefined') {
+        try {
+          const parsed = new URL(String(data.redirectUri), window.location.origin);
+          if (parsed.origin === window.location.origin && parsed.href !== 'postmessage') {
+            redirectUri = String(data.redirectUri).trim();
+          }
+        } catch {}
+      }
     }
   } catch {}
-  return '';
+
+  return { clientId, redirectUri };
+}
+
+export async function resolveGoogleClientId(): Promise<string> {
+  const { clientId } = await resolveGoogleOAuthConfig();
+  return clientId;
 }
 
 export function getPendingOAuthTransaction(): PendingOAuthTransaction | null {
@@ -118,13 +135,12 @@ export async function startGoogleOAuthRedirect(options: {
   loginHint?: string;
   fromPwa?: boolean;
 }): Promise<void> {
-  const clientId = await resolveGoogleClientId();
+  const { clientId, redirectUri } = await resolveGoogleOAuthConfig();
   if (!clientId) {
     throw new Error('GOOGLE_CLIENT_ID non configurato sul server.');
   }
 
   const nonce = createNonce();
-  const redirectUri = window.location.origin;
   const fromPwa = Boolean(options.fromPwa);
 
   const tx: PendingOAuthTransaction = {
@@ -144,6 +160,7 @@ export async function startGoogleOAuthRedirect(options: {
     nonce,
     mode: options.mode,
     linkToUserId: options.linkToUserId,
+    redirectUri,
     fromPwa,
   };
 

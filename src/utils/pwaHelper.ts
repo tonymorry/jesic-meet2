@@ -44,6 +44,32 @@ export const isInstalledPwa = (): boolean => {
 };
 
 /**
+ * Rileva se il dispositivo è Apple iOS / iPadOS (iPhone, iPad, iPod).
+ * Include iPadOS in modalità desktop (MacIntel con multi-touch).
+ */
+export const isIosDevice = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  try {
+    const ua = navigator.userAgent || '';
+    return (
+      /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1)
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Rileva esclusivamente l'app scaricata (PWA standalone) su dispositivi Apple iOS/iPadOS,
+ * dove WebKit isola SFSafariViewController impedendo ai popup OAuth di comunicare via postMessage.
+ * Android PWA e Desktop continuano a usare regolarmente il flusso popup nativo.
+ */
+export const isIosStandalonePwa = (): boolean => {
+  return isIosDevice() && isInstalledPwa();
+};
+
+/**
  * Aggiorna il pallino/badge numerico sull'icona della PWA installata (App Badging API)
  * Supportato su iOS (16.4+ PWA aggiunte alla Home), Android WebAPK e Desktop PWA.
  */

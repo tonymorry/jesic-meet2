@@ -13,7 +13,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AppRole, User, UserSystemRole, Group } from '../types';
 import { useGoogleLogin } from '@react-oauth/google';
-import { isInstalledPwa } from '../utils/pwaHelper';
+import { isIosStandalonePwa } from '../utils/pwaHelper';
 import { startGoogleOAuthRedirect } from '../utils/googleOAuthPwa';
 import {
   Mail,
@@ -110,15 +110,20 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     },
     onNonOAuthError: (nonOAuthErr) => {
       if (nonOAuthErr.type === 'popup_failed_to_open') {
-        startGoogleOAuthRedirect({
-          mode: 'link_calendar',
-          linkToUserId: currentUser.id,
-          loginHint: currentUser.email,
-          fromPwa: isInstalledPwa(),
-        }).catch((err: any) => {
-          setIsConnectingCalendar(false);
-          showNotification(err?.message || 'Popup Google bloccato dal browser.');
-        });
+        if (isIosStandalonePwa()) {
+          startGoogleOAuthRedirect({
+            mode: 'link_calendar',
+            linkToUserId: currentUser.id,
+            loginHint: currentUser.email,
+            fromPwa: true,
+          }).catch((err: any) => {
+            setIsConnectingCalendar(false);
+            showNotification(err?.message || 'Impossibile avviare il collegamento con Google.');
+          });
+          return;
+        }
+        setIsConnectingCalendar(false);
+        showNotification('Popup Google bloccato dal browser. Consenti i popup per questo sito e riprova.');
         return;
       }
       setIsConnectingCalendar(false);
@@ -142,7 +147,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const triggerConnectGoogleCalendar = async () => {
     setIsConnectingCalendar(true);
-    if (isInstalledPwa()) {
+    if (isIosStandalonePwa()) {
       try {
         await startGoogleOAuthRedirect({
           mode: 'link_calendar',

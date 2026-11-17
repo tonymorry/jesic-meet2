@@ -10,7 +10,7 @@
  * - Auto-ripristino su rotazione endpoint APNs (pushsubscriptionchange)
  */
 
-const CACHE_NAME = 'jesic-pwa-v7';
+const CACHE_NAME = 'jesic-pwa-v8';
 const PUSH_META_CACHE = 'jesic-push-meta';
 const PUSH_META_KEY = '/__push_meta__';
 
@@ -82,9 +82,10 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // 1. Non intercettare /api/, WebSocket, richieste non GET o callback OAuth Google
+  // 1. Non intercettare richieste esterne (Google OAuth/API), /api/, WebSocket, richieste non GET o callback OAuth
   if (
     request.method !== 'GET' ||
+    url.origin !== self.location.origin ||
     url.pathname.startsWith('/api') ||
     url.pathname.startsWith('/ws') ||
     url.search.includes('code=')

@@ -687,7 +687,10 @@ export default function App() {
       const isClientForm =
         window.location.pathname.includes('/prenota-call') ||
         window.location.hash.includes('prenota-call');
-      if (isClientForm) {
+      const isOAuthReturn =
+        window.location.search.includes('code=') ||
+        window.location.search.includes('error=');
+      if (isClientForm || isOAuthReturn) {
         return false;
       }
     }
@@ -1319,7 +1322,7 @@ export default function App() {
 
       const linkToUserId = decodedState?.linkToUserId || pendingTx?.linkToUserId;
       const handoffNonce = decodedState?.nonce || pendingTx?.nonce;
-      const redirectUri = pendingTx?.redirectUri || window.location.origin;
+      const redirectUri = decodedState?.redirectUri || pendingTx?.redirectUri || window.location.origin;
 
       (async () => {
         try {
@@ -1430,10 +1433,18 @@ export default function App() {
 
     checkPendingGoogleHandoff();
     window.addEventListener('focus', checkPendingGoogleHandoff);
+    window.addEventListener('pageshow', checkPendingGoogleHandoff);
     document.addEventListener('visibilitychange', checkPendingGoogleHandoff);
+    const intervalId = window.setInterval(() => {
+      if (getPendingOAuthTransaction()?.nonce && document.visibilityState === 'visible') {
+        checkPendingGoogleHandoff();
+      }
+    }, 2000);
     return () => {
       window.removeEventListener('focus', checkPendingGoogleHandoff);
+      window.removeEventListener('pageshow', checkPendingGoogleHandoff);
       document.removeEventListener('visibilitychange', checkPendingGoogleHandoff);
+      window.clearInterval(intervalId);
     };
   }, [syncAllAppData]);
 

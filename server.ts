@@ -364,7 +364,8 @@ function storeGoogleOAuthHandoff(nonce: unknown, user: any, calendarScopeGranted
 // GET /api/auth/google/config - Restituisce il Client ID Google pubblico per i flussi redirect PWA
 app.get('/api/auth/google/config', (_req: Request, res: Response) => {
   const clientId = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
-  return res.json({ clientId });
+  const redirectUri = (process.env.GOOGLE_REDIRECT_URI || '').trim();
+  return res.json({ clientId, ...(redirectUri ? { redirectUri } : {}) });
 });
 
 // GET /api/auth/google/handoff?nonce=... - Recupera la sessione/token dopo OAuth redirect su iOS PWA

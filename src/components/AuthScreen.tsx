@@ -11,7 +11,7 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
 import { useGoogleLogin } from '@react-oauth/google';
-import { isInstalledPwa } from '../utils/pwaHelper';
+import { isIosStandalonePwa } from '../utils/pwaHelper';
 import { startGoogleOAuthRedirect } from '../utils/googleOAuthPwa';
 import {
   UserPlus,
@@ -115,11 +115,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     onNonOAuthError: (nonOAuthErr) => {
       console.warn('Finestra Google chiusa o bloccata:', nonOAuthErr);
       if (nonOAuthErr.type === 'popup_failed_to_open') {
-        // Fallback automatico al flusso redirect se il browser blocca i popup
-        startGoogleOAuthRedirect({ mode: 'login', fromPwa: isInstalledPwa() }).catch((err: any) => {
-          setIsGoogleLoading(false);
-          setErrorMsg(err?.message || 'Popup Google bloccato dal browser.');
-        });
+        if (isIosStandalonePwa()) {
+          startGoogleOAuthRedirect({ mode: 'login', fromPwa: true }).catch((err: any) => {
+            setIsGoogleLoading(false);
+            setErrorMsg(err?.message || 'Impossibile aprire l\'accesso Google.');
+          });
+          return;
+        }
+        setIsGoogleLoading(false);
+        setErrorMsg('Popup Google bloccato dal browser. Consenti i popup per questo sito e riprova.');
         return;
       }
       setIsGoogleLoading(false);
@@ -147,9 +151,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setSuccessMsg(null);
     setIsGoogleLoading(true);
 
-    // In modalità App Installata (PWA su iPhone/iPad/Android) i popup OAuth non comunicano con la finestra standalone:
-    // usa sempre il flusso Redirect con access_type=offline e handoff automatico.
-    if (isInstalledPwa()) {
+    // Solo su iOS/iPadOS App Installata (PWA standalone) WebKit isola i popup SFSafariViewController:
+    // usa il flusso Redirect con handoff automatico; Android PWA, Safari browser e Desktop usano il popup nativo.
+    if (isIosStandalonePwa()) {
       try {
         await startGoogleOAuthRedirect({ mode: 'login', fromPwa: true });
       } catch (err: any) {
